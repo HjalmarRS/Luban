@@ -39,6 +39,7 @@ const settings = {
             'it', // Italian
             'ja', // Japanese
             'ko', // Korean
+            'nl', // Dutch
             'ru', // Russian
             'zh-cn' // Simplified Chinese
         ],
