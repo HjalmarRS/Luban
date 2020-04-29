@@ -67,7 +67,8 @@ function main() {
         F: ['Italian', 'it'],
         G: ['Spanish', 'es'],
         H: ['French', 'fr'],
-        I: ['Russian', 'ru']
+        I: ['Russian', 'ru'],
+        J: ['Dutch', 'nl']
     };
 
     Object.keys(col2lang).forEach((col) => {
