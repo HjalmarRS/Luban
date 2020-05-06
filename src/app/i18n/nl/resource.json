@@ -711,5 +711,11 @@
     "On the software": "Via de software",
     "Material Thickness": "Dikte materiaal",
     "If you reinstalled the laser module, please redo the Camera Calibration on the Touchscreen before proceeding.": "Als u de lasermodule opnieuw hebt geïnstalleerd, moet u de camerakalibratie opnieuw uitvoeren op het touchscreen voordat u doorgaat.",
-    "Note: If you use the USB disk to engrave, please make sure you set the work origin in the software instead of on the touchscreen.": "Opmerking: als u de USB-schijf gebruikt om te graveren, zorg er dan voor dat u de werkoorsprong in de software instelt in plaats van op het touchscreen."
+    "Note: If you use the USB disk to engrave, please make sure you set the work origin in the software instead of on the touchscreen.": "Opmerking: als u de USB-schijf gebruikt om te graveren, zorg er dan voor dat u de werkoorsprong in de software instelt in plaats van op het touchscreen.",
+    "Door Detection": "Deur detectie",
+    "Time Out": "Time-out",
+    "Wait Time" : "Wacht tijd",
+    "3s": "3s",
+    "15s": "15s",
+    "30s": "30s"
 }
