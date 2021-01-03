@@ -1,10 +1,10 @@
 /* eslint no-continue: 0 */
+import _ from 'lodash';
 import {
     parseStream,
     parseFile,
     parseFileSync,
     parseString,
-    parseArraySync,
     parseLine
 } from './gcodeParser';
 
@@ -27,6 +27,31 @@ const fromPairs = (pairs) => {
     }
 
     return result;
+};
+
+const trimArgs = (args) => {
+    try {
+        if (args === null || args === undefined) {
+            return null;
+        }
+        if (typeof args !== 'string') {
+            return args;
+        }
+        args = args.trim();
+        if (args === 'null' || args === 'undefined') {
+            return null;
+        }
+        if (args === 'true' || args === 'false') {
+            return args === 'true';
+        }
+        if (!_.isNaN(parseFloat(args))) {
+            return parseFloat(args);
+        }
+        return args;
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
 };
 
 const partitionWordsByGroup = (words = []) => {
@@ -101,7 +126,7 @@ const interpret = (self, data) => {
             args = fromPairs(words);
         } else if (letter[0] === ';') {
             cmd = letter;
-            args = code;
+            args = trimArgs(code);
         }
 
         if (!cmd) {
@@ -189,10 +214,15 @@ class Interpreter {
         return list;
     }
 
-    loadFromArraySync(array, callback = noop) {
-        const list = parseArraySync(array);
+    loadFromArraySync(list, callback = noop) {
+        const flatten = false;
+        const noParseLine = false;
         for (let i = 0; i < list.length; ++i) {
-            interpret(this, list[i]);
+            const result = parseLine(list[i], {
+                flatten,
+                noParseLine
+            });
+            interpret(this, result);
             callback(list[i], i, list.length);
         }
         return list;

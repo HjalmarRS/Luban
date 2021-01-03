@@ -1,4 +1,3 @@
-import isEmpty from 'lodash/isEmpty';
 import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
 import classNames from 'classnames';
@@ -14,13 +13,15 @@ import { ABSENT_VALUE } from '../../constants';
 
 class GcodeParameters extends PureComponent {
     static propTypes = {
+        selectedModelArray: PropTypes.array,
+        selectedModelVisible: PropTypes.bool,
         printOrder: PropTypes.number.isRequired,
         gcodeConfig: PropTypes.shape({
             // jogSpeed: PropTypes.number.isRequired,
             jogSpeed: PropTypes.number,
-            workSpeed: PropTypes.number.isRequired,
-            plungeSpeed: PropTypes.number.isRequired,
-            dwellTime: PropTypes.number.isRequired,
+            workSpeed: PropTypes.number,
+            plungeSpeed: PropTypes.number,
+            dwellTime: PropTypes.number,
             multiPassEnabled: PropTypes.bool,
             multiPassDepth: PropTypes.number,
             multiPasses: PropTypes.number,
@@ -81,16 +82,15 @@ class GcodeParameters extends PureComponent {
     };
 
     render() {
-        if (isEmpty(this.props.gcodeConfig)) {
-            return null;
-        }
-        const { printOrder } = this.props;
+        const { printOrder, selectedModelArray, selectedModelVisible } = this.props;
         const actions = this.actions;
         const {
-            jogSpeed, workSpeed, dwellTime, plungeSpeed,
-            fixedPowerEnabled = null, fixedPower,
-            multiPassEnabled = null, multiPasses, multiPassDepth
+            jogSpeed = 0, workSpeed = 0, dwellTime = 0, plungeSpeed = 0,
+            fixedPowerEnabled, fixedPower = 0,
+            multiPassEnabled, multiPasses = 0, multiPassDepth = 0
         } = this.props.gcodeConfig;
+        // todo
+        const disabled = !(selectedModelArray && selectedModelArray.length === 1 && selectedModelVisible);
 
         return (
             <React.Fragment>
@@ -108,7 +108,7 @@ class GcodeParameters extends PureComponent {
                 {this.state.expanded && (
                     <React.Fragment>
                         <TipTrigger
-                            title={i18n._('Print Order')}
+                            title={i18n._('Processing Order')}
                             content={i18n._('When engraving multiple images, this parameter determines the print order of the selected image. When the orders are the same, the image uploaded first will be engraved first.')}
                         >
                             <div className="sm-parameter-row">
@@ -116,6 +116,7 @@ class GcodeParameters extends PureComponent {
                                 <Input
                                     className="sm-parameter-row__slider-input"
                                     value={printOrder}
+                                    disabled={disabled}
                                     min={1}
                                     max={10}
                                     onChange={actions.onChangePrintOrder}
@@ -123,6 +124,7 @@ class GcodeParameters extends PureComponent {
                                 <Slider
                                     className="sm-parameter-row__slider"
                                     value={printOrder}
+                                    disabled={disabled}
                                     min={1}
                                     max={10}
                                     onChange={actions.onChangePrintOrder}
@@ -139,6 +141,7 @@ class GcodeParameters extends PureComponent {
                                     <Input
                                         className="sm-parameter-row__input"
                                         value={jogSpeed}
+                                        disabled={disabled}
                                         min={1}
                                         max={6000}
                                         step={1}
@@ -158,6 +161,7 @@ class GcodeParameters extends PureComponent {
                                     <Input
                                         className="sm-parameter-row__input"
                                         value={workSpeed}
+                                        disabled={disabled}
                                         min={1}
                                         step={1}
                                         max={6000}
@@ -177,12 +181,13 @@ class GcodeParameters extends PureComponent {
                                     <Input
                                         className="sm-parameter-row__input"
                                         value={dwellTime}
+                                        disabled={disabled}
                                         min={0.1}
                                         max={1000}
                                         step={0.1}
                                         onChange={actions.onChangeDwellTime}
                                     />
-                                    <span className="sm-parameter-row__input-unit">mm/min</span>
+                                    <span className="sm-parameter-row__input-unit">ms/dot</span>
                                 </div>
                             </TipTrigger>
                         )}
@@ -196,6 +201,7 @@ class GcodeParameters extends PureComponent {
                                     <Input
                                         className="sm-parameter-row__input"
                                         value={plungeSpeed}
+                                        disabled={disabled}
                                         min={0.1}
                                         max={1000}
                                         step={0.1}
@@ -205,11 +211,12 @@ class GcodeParameters extends PureComponent {
                                 </div>
                             </TipTrigger>
                         )}
-                        {multiPassEnabled !== null && (
+                        {multiPassEnabled !== undefined && (
                             <OptionalDropdown
                                 style={{ marginTop: '10px', marginBottom: '10px' }}
                                 title={i18n._('Multi-pass')}
                                 titleTip={i18n._('When enabled, the printer will run the G-code multiple times automatically according to the below settings. This feature helps you cut materials that can\'t be cut with only one pass.')}
+                                disabled={disabled}
                                 onClick={actions.onToggleMultiPassEnabled}
                                 hidden={!multiPassEnabled}
                             >
@@ -224,6 +231,7 @@ class GcodeParameters extends PureComponent {
                                             className="sm-parameter-row__input"
                                             min={2}
                                             max={50}
+                                            disabled={disabled}
                                             value={multiPasses}
                                             onChange={actions.onChangeMultiPasses}
                                         />
@@ -241,6 +249,7 @@ class GcodeParameters extends PureComponent {
                                             min={0}
                                             max={10}
                                             value={multiPassDepth}
+                                            disabled={disabled}
                                             onChange={actions.onChangeMultiDepth}
                                         />
                                         <span className="sm-parameter-row__input-unit">mm</span>
@@ -248,11 +257,12 @@ class GcodeParameters extends PureComponent {
                                 </TipTrigger>
                             </OptionalDropdown>
                         )}
-                        {fixedPowerEnabled !== null && (
+                        {fixedPowerEnabled !== undefined && (
                             <OptionalDropdown
                                 style={{ marginTop: '10px' }}
                                 title={i18n._('Fixed Power')}
                                 titleTip={i18n._('When enabled, the power used to engrave this image will be set in the G-code, so it is not affected by the power you set in Workspace. When engraving multiple images, you can set the power for each image separately.')}
+                                disabled={disabled}
                                 onClick={actions.onToggleFixedPowerEnabled}
                                 hidden={!fixedPowerEnabled}
                             >
@@ -267,6 +277,7 @@ class GcodeParameters extends PureComponent {
                                             min={1}
                                             max={100}
                                             value={fixedPower}
+                                            disabled={disabled}
                                             onChange={actions.onChangeFixedPower}
                                         />
                                         <Slider
@@ -275,6 +286,7 @@ class GcodeParameters extends PureComponent {
                                             min={0}
                                             max={100}
                                             step={0.5}
+                                            disabled={disabled}
                                             onChange={actions.onChangeFixedPower}
                                         />
                                     </div>

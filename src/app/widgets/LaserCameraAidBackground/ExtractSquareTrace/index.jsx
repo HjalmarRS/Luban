@@ -9,6 +9,7 @@ import styles from '../styles.styl';
 import ExtractPreview from './ExtractPreview';
 import ManualCalibration from '../ManualCalibration';
 import { MACHINE_SERIES } from '../../../constants';
+import { actions } from '../../../flux/machine';
 
 const PANEL_EXTRACT_TRACE = 1;
 const PANEL_MANUAL_CALIBRATION = 2;
@@ -20,6 +21,7 @@ class ExtractSquareTrace extends PureComponent {
         size: PropTypes.object.isRequired,
         server: PropTypes.object.isRequired,
         series: PropTypes.string.isRequired,
+        headType: PropTypes.string.isRequired,
         canTakePhoto: PropTypes.bool.isRequired,
         lastFileNames: PropTypes.array,
         xSize: PropTypes.array.isRequired,
@@ -27,7 +29,8 @@ class ExtractSquareTrace extends PureComponent {
         updateEachPicSize: PropTypes.func.isRequired,
         changeLastFileNames: PropTypes.func.isRequired,
         changeCanTakePhoto: PropTypes.func.isRequired,
-        setBackgroundImage: PropTypes.func.isRequired
+        setBackgroundImage: PropTypes.func.isRequired,
+        executeGcodeG54: PropTypes.func.isRequired
     };
 
     extractingPreview = [];
@@ -185,7 +188,7 @@ class ExtractSquareTrace extends PureComponent {
                 for (let i = 0; i < position.length; i++) {
                     if (this.close) {
                         this.props.changeCanTakePhoto(true);
-                        this.props.server.executeGcode('G54');
+                        this.props.executeGcodeG54(this.props.series, this.props.headType);
                         reject();
                         return;
                     }
@@ -257,7 +260,11 @@ class ExtractSquareTrace extends PureComponent {
                                 this.props.updateEachPicSize('ySize', this.state.ySize);
 
                                 this.extractingPreview[task.index].current.onChangeImage(
-                                    DefaultBgiName, this.state.xSize[task.index] * this.multiple, this.state.ySize[task.index] * this.multiple, task.index, this.multiple
+                                    DefaultBgiName,
+                                    this.state.xSize[task.index] * this.multiple,
+                                    this.state.ySize[task.index] * this.multiple,
+                                    task.index,
+                                    this.multiple
                                 );
 
                                 const { fileName } = JSON.parse(res.text);
@@ -273,7 +280,11 @@ class ExtractSquareTrace extends PureComponent {
                                     const { filename } = JSON.parse(stitchImg.text);
                                     if (this.extractingPreview[task.index].current) {
                                         this.extractingPreview[task.index].current.onChangeImage(
-                                            filename, this.state.xSize[task.index] * this.multiple, this.state.ySize[task.index] * this.multiple, task.index, this.multiple
+                                            filename,
+                                            this.state.xSize[task.index] * this.multiple,
+                                            this.state.ySize[task.index] * this.multiple,
+                                            task.index,
+                                            this.multiple
                                         );
                                     }
                                     task.status = 2;
@@ -365,7 +376,7 @@ class ExtractSquareTrace extends PureComponent {
                     outputFilename: res.body.filename,
                     isStitched: true
                 });
-                this.props.server.executeGcode('G54');
+                this.props.executeGcodeG54(this.props.series, this.props.headType);
             });
         },
         setBackgroundImage: () => {
@@ -428,7 +439,7 @@ class ExtractSquareTrace extends PureComponent {
                         {i18n._('Camera Capture')}
                     </div>
                     <div style={{ margin: '1rem 0' }}>
-                        {i18n._('The camera on the laser module captures images of the work area, and stitch them together as the background. The accuracy of camera calibration affects how the captured images are mapped with the machine coordinates. If you have reinstalled the laser module, please redo the Camera Calibration on the touch screen before proceeding.')}
+                        {i18n._('The camera on the laser module captures images of the work area, and stitch them together as the background. The accuracy of Camera Calibration affects how the captured image is mapped with machine coordinates. If you have reinstalled the laser module, please redo Camera Calibration on the touch screen before proceeding.')}
                     </div>
                     <div
                         className={styles['photo-display']}
@@ -513,9 +524,17 @@ const mapStateToProps = (state) => {
     const machine = state.machine;
     return {
         series: machine.series,
+        headType: machine.headType,
         size: machine.size,
         server: machine.server,
         laserSize: machine.laserSize
     };
 };
-export default connect(mapStateToProps)(ExtractSquareTrace);
+
+const mapDispatchToProps = (dispatch) => {
+    return {
+        executeGcodeG54: (series, headType) => dispatch(actions.executeGcodeG54(series, headType))
+    };
+};
+
+export default connect(mapStateToProps, mapDispatchToProps)(ExtractSquareTrace);

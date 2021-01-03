@@ -10,11 +10,11 @@
 
 import * as THREE from 'three';
 
-THREE.STLExporter = function () {};
+function STLExporter() {};
 
-THREE.STLExporter.prototype = {
+STLExporter.prototype = {
 
-	constructor: THREE.STLExporter,
+	constructor: STLExporter,
 
 	parse: ( function () {
 
@@ -62,8 +62,7 @@ THREE.STLExporter.prototype = {
 
 								vector.copy( vertices[ indices[ j ] ] ).applyMatrix4( matrixLocal );
 
-                                // output += '\t\t\tvertex ' + vector.x + ' ' + vector.y + ' ' + vector.z + '\n';
-								output += '\t\t\tvertex ' + vector.x + ' ' + (-vector.z) + ' ' + vector.y + '\n';
+                                output += '\t\t\tvertex ' + vector.x + ' ' + vector.y + ' ' + vector.z + '\n';
 
 							}
 
@@ -88,4 +87,4 @@ THREE.STLExporter.prototype = {
 
 };
 
-export default THREE.STLExporter;
+export default STLExporter;

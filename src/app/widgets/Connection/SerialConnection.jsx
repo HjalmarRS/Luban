@@ -19,18 +19,20 @@ import { actions as machineActions } from '../../flux/machine';
 import PrintingState from './PrintingState';
 import LaserState from './LaserState';
 import CNCState from './CNCState';
+import EnclosureState from './EnclosureState';
 import MachineSelectModal from '../../modals/modal-machine-select';
 
 class SerialConnection extends PureComponent {
     static propTypes = {
         isOpen: PropTypes.bool.isRequired,
+        enclosureOnline: PropTypes.bool.isRequired,
 
         port: PropTypes.string.isRequired,
         headType: PropTypes.string,
         connectionTimeout: PropTypes.number,
         isConnected: PropTypes.bool,
-        updatePort: PropTypes.func.isRequired,
-        executeGcode: PropTypes.func.isRequired,
+        setMachineSerialPort: PropTypes.func.isRequired,
+        executeGcodeG54: PropTypes.func.isRequired,
         updateMachineState: PropTypes.func.isRequired
     };
 
@@ -81,12 +83,6 @@ class SerialConnection extends PureComponent {
 
         // refresh ports on mount
         setTimeout(() => this.listPorts());
-    }
-
-    componentDidUpdate(prevProps, prevState) {
-        if (this.state.port !== prevState.port) {
-            this.props.updatePort(this.state.port);
-        }
     }
 
     componentWillUnmount() {
@@ -154,8 +150,12 @@ class SerialConnection extends PureComponent {
             });
             return;
         }
+
         const port = this.state.port;
         log.debug(`Connected to ${port}.`);
+
+        // save serial port on connection succeeded
+        this.props.setMachineSerialPort(this.state.port);
 
         const { series, seriesSize, headType } = state;
         const machineSeries = valueOf(MACHINE_SERIES, 'alias', `${series}-${seriesSize}`)
@@ -169,9 +169,7 @@ class SerialConnection extends PureComponent {
                 headType: machineHeadType,
                 canReselectMachine: false
             });
-            if (machineSeries.value !== MACHINE_SERIES.ORIGINAL.value) {
-                this.props.executeGcode('G54');
-            }
+            this.props.executeGcodeG54(machineSeries, machineHeadType);
         } else {
             MachineSelectModal({
                 series: machineSeries,
@@ -183,9 +181,7 @@ class SerialConnection extends PureComponent {
                         headType: headTypeT,
                         canReselectMachine: true
                     });
-                    if (seriesT !== MACHINE_SERIES.ORIGINAL.value) {
-                        this.props.executeGcode('G54');
-                    }
+                    this.props.executeGcodeG54(seriesT, headTypeT);
                 }
 
             });
@@ -364,6 +360,11 @@ class SerialConnection extends PureComponent {
                         {headType === MACHINE_HEAD_TYPE.CNC.value && <CNCState headType={headType} />}
                     </div>
                 )}
+                {isConnected && this.props.enclosureOnline && (
+                    <div className="mb-3">
+                        <EnclosureState />
+                    </div>
+                )}
 
                 <div className="btn-group">
                     {!isConnected && (
@@ -375,7 +376,7 @@ class SerialConnection extends PureComponent {
                         >
                             <i className="fa fa-toggle-off" />
                             <span className="space" />
-                            {i18n._('Open')}
+                            {i18n._('Connect')}
                         </button>
                     )}
                     {isConnected && (
@@ -386,7 +387,7 @@ class SerialConnection extends PureComponent {
                         >
                             <i className="fa fa-toggle-on" />
                             <Space width={4} />
-                            {i18n._('Close')}
+                            {i18n._('Disconnect')}
                         </button>
                     )}
                     {err && (
@@ -401,11 +402,12 @@ class SerialConnection extends PureComponent {
 const mapStateToProps = (state) => {
     const machine = state.machine;
 
-    const { port, isOpen, isConnected, headType, connectionTimeout } = machine;
+    const { port, isOpen, enclosureOnline, isConnected, headType, connectionTimeout } = machine;
 
     return {
         port,
         isOpen,
+        enclosureOnline,
         headType,
         isConnected,
         connectionTimeout
@@ -414,8 +416,8 @@ const mapStateToProps = (state) => {
 const mapDispatchToProps = (dispatch) => {
     return {
         updateMachineState: (state) => dispatch(machineActions.updateMachineState(state)),
-        executeGcode: (gcode, context) => dispatch(machineActions.executeGcode(gcode, context)),
-        updatePort: (port) => dispatch(machineActions.updatePort(port))
+        executeGcodeG54: (series, headType) => dispatch(machineActions.executeGcodeG54(series, headType)),
+        setMachineSerialPort: (port) => dispatch(machineActions.connect.setMachineSerialPort(port))
     };
 };
 export default connect(mapStateToProps, mapDispatchToProps)(SerialConnection);

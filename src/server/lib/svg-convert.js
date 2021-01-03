@@ -5,8 +5,9 @@ import * as opentype from 'opentype.js';
 import { pathWithRandomSuffix } from './random-utils';
 import fontManager from './FontManager';
 import logger from './logger';
-import SVGParser from './SVGParser';
+import SVGParser from '../../shared/lib/SVGParser';
 import DataStorage from '../DataStorage';
+import { svgToString } from '../../shared/lib/SVGParser/SvgToString';
 
 const log = logger('svg-convert');
 
@@ -20,15 +21,30 @@ const TEMPLATE = `<?xml version="1.0" encoding="utf-8"?>
 `;
 
 
+/**
+ * @param options
+ *      - uploadName
+ *      - vectorThreshold
+ *      - invert
+ *      - turdSize
+ *
+ * @returns {Promise<any>}
+ */
 const convertRasterToSvg = (options) => {
-    const { uploadName, vectorThreshold, isInvert, turdSize } = options;
+    const { uploadName, vectorThreshold, invert, turdSize } = options;
+    // svg may get here, return the original file
+    if (uploadName.indexOf('.svg') > 0) {
+        return Promise.resolve({
+            filename: uploadName
+        });
+    }
     const outputFilename = pathWithRandomSuffix(`${uploadName}.svg`);
     const modelPath = `${DataStorage.tmpDir}/${uploadName}`;
     const params = {
         threshold: vectorThreshold,
         color: 'black',
         background: 'transparent',
-        blackOnWhite: !isInvert,
+        blackOnWhite: !invert,
         turdSize: turdSize
     };
 
@@ -44,7 +60,7 @@ const convertRasterToSvg = (options) => {
             const result = await svgParser.parse(svgStr);
             const { width, height } = result;
 
-            fs.writeFile(targetPath, svgStr, () => {
+            fs.writeFile(targetPath, svgToString(result), () => {
                 resolve({
                     // filename: outputFilename,
                     originalName: outputFilename,
@@ -133,5 +149,53 @@ const convertTextToSvg = async (options) => {
     });
 };
 
+// just process one line text, multi-line text can be transfered to text elements in front end
+const convertOneLineTextToSvg = async (options) => {
+    const { text, font, name, size, sourceWidth, sourceHeight } = options;
 
-export { convertRasterToSvg, convertTextToSvg };
+    const uploadName = pathWithRandomSuffix(name);
+    const fontObj = await fontManager.getFont(font);
+    const unitsPerEm = fontObj.unitsPerEm;
+    const descender = fontObj.tables.os2.sTypoDescender;
+
+    let estimatedFontSize = Math.round(size / 72 * 25.4 * 40);
+    const originPath = fontObj.getPath(text, 0, 0, estimatedFontSize);
+    const bbox = originPath.getBoundingBox();
+    const width = bbox.x2 - bbox.x1;
+    const scale = sourceWidth / width;
+    estimatedFontSize *= scale;
+    const x = 0;
+    const y = (unitsPerEm + descender) / unitsPerEm * sourceHeight;
+
+    const fullPath = new opentype.Path();
+    const p = fontObj.getPath(text, x, y, Math.floor(estimatedFontSize));
+    fullPath.extend(p);
+    fullPath.stroke = 'black';
+
+    const svgString = _.template(TEMPLATE)({
+        path: fullPath.toSVG(),
+        x0: 0,
+        y0: 0,
+        width: sourceWidth,
+        height: sourceHeight
+    });
+    return new Promise((resolve, reject) => {
+        const targetPath = `${DataStorage.tmpDir}/${uploadName}`;
+        fs.writeFile(targetPath, svgString, (err) => {
+            if (err) {
+                log.error(err);
+                reject(err);
+            } else {
+                resolve({
+                    originalName: name,
+                    uploadName: uploadName,
+                    width: sourceWidth,
+                    height: sourceHeight
+                });
+            }
+        });
+    });
+};
+
+
+export { convertRasterToSvg, convertTextToSvg, convertOneLineTextToSvg };

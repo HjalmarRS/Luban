@@ -41,7 +41,9 @@ function startServices(server) {
 
     // task manager
     socketServer.registerEvent('taskCommit:generateToolPath', TaskManager.addGenerateToolPathTask);
+    socketServer.registerEvent('taskCommit:generateViewPath', TaskManager.addGenerateViewPathTask);
     socketServer.registerEvent('taskCommit:generateGcode', TaskManager.addGenerateGcodeTask);
+    socketServer.registerEvent('taskCommit:processImage', TaskManager.addProcessImageTask);
 
     socketServer.start(server);
 
@@ -77,7 +79,6 @@ function registerApis(app) {
 
     // Image
     app.post(urljoin(settings.route, 'api/image'), api.image.set);
-    app.post(urljoin(settings.route, 'api/image/laserCaseImage'), api.image.laserCaseImage);
     app.post(urljoin(settings.route, 'api/image/process'), api.image.process);
     app.post(urljoin(settings.route, 'api/image/stock'), api.image.stockRemapProcess);
     app.post(urljoin(settings.route, 'api/image/trace'), api.image.processTrace);
@@ -93,6 +94,7 @@ function registerApis(app) {
     // Svg
     app.post(urljoin(settings.route, 'api/svg/convertRasterToSvg'), api.svg.convertRasterToSvg);
     app.post(urljoin(settings.route, 'api/svg/convertTextToSvg'), api.svg.convertTextToSvg);
+    app.post(urljoin(settings.route, 'api/svg/convertOneLineTextToSvg'), api.svg.convertOneLineTextToSvg);
 
     // ToolPath
     app.post(urljoin(settings.route, 'api/toolpath/generate'), api.toolpath.generate);
@@ -141,6 +143,14 @@ function registerApis(app) {
     app.post(urljoin(settings.route, 'api/file/uploadCaseFile'), api.file.uploadCaseFile);
     app.post(urljoin(settings.route, 'api/file/uploadGcodeFile'), api.file.uploadGcodeFile);
     app.post(urljoin(settings.route, 'api/file/uploadUpdateFile'), api.file.uploadUpdateFile);
+    app.post(urljoin(settings.route, 'api/file/buildFirmwareFile'), api.file.buildFirmwareFile);
+    app.post(urljoin(settings.route, 'api/file/saveEnv'), api.file.saveEnv);
+    app.post(urljoin(settings.route, 'api/file/getEnv'), api.file.getEnv);
+    app.post(urljoin(settings.route, 'api/file/recoverEnv'), api.file.recoverEnv);
+    app.post(urljoin(settings.route, 'api/file/removeEnv'), api.file.removeEnv);
+    app.post(urljoin(settings.route, 'api/file/packageEnv'), api.file.packageEnv);
+    app.post(urljoin(settings.route, 'api/file/recoverProjectFile'), api.file.recoverProjectFile);
+
 
     app.get(urljoin(settings.route, 'api/printingQualityDefinitions/:series'), api.printingConfigs.getQualityDefinitions);
     app.get(urljoin(settings.route, 'api/printingMaterialDefinitions'), api.printingConfigs.getMaterialDefinitions);
@@ -150,6 +160,18 @@ function registerApis(app) {
     app.delete(urljoin(settings.route, 'api/printingDefinition/:definitionId'), api.printingConfigs.removeDefinition);
     app.put(urljoin(settings.route, 'api/printingDefinition/:definitionId'), api.printingConfigs.updateDefinition);
     app.post(urljoin(settings.route, 'api/printingDefinition/upload'), api.printingConfigs.uploadDefinition);
+
+    app.get(urljoin(settings.route, 'api/cncToolDefinitions'), api.cncConfigs.getToolDefinitions);
+
+    app.get(urljoin(settings.route, 'api/cncToolListDefinition/:definitionId'), api.cncConfigs.getToolListDefinition);
+    app.post(urljoin(settings.route, 'api/cncToolCategoryDefinition'), api.cncConfigs.createToolCategoryDefinition);
+    app.post(urljoin(settings.route, 'api/cncToolListDefinition'), api.cncConfigs.createToolListDefinition);
+    app.delete(urljoin(settings.route, 'api/cncToolCategoryDefinition'), api.cncConfigs.removeToolCategoryDefinition);
+    app.delete(urljoin(settings.route, 'api/cncToolListDefinition'), api.cncConfigs.removeToolListDefinition);
+    app.post(urljoin(settings.route, 'api/cncToolDefinitions/upload'), api.cncConfigs.uploadToolDefinition);
+    app.post(urljoin(settings.route, 'api/cncToolListDefinition/:definitionId'), api.cncConfigs.changeActiveToolListDefinition);
+
+    app.put(urljoin(settings.route, 'api/cncToolDefinitions/update'), api.cncConfigs.updateToolDefinition);
 }
 
 export {

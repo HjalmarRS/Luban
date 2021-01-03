@@ -8,11 +8,14 @@ import modal from '../../lib/modal';
 import Dropzone from '../../components/Dropzone';
 import CNCVisualizer from '../../widgets/CNCVisualizer';
 import Widget from '../../widgets/Widget';
-import { actions as cncLaserActions } from '../../flux/cncLaserShared';
+
 import { actions as widgetActions } from '../../flux/widget';
+import { actions as editorActions } from '../../flux/editor';
+import CncToolManager from '../../views/CncToolManager/CncToolManager';
 import styles from './styles.styl';
 
-const ACCEPT = '.svg, .png, .jpg, .jpeg, .bmp, .dxf';
+
+const ACCEPT = '.svg, .png, .jpg, .jpeg, .bmp, .dxf, .stl';
 
 class Cnc extends Component {
     static propTypes = {
@@ -34,8 +37,8 @@ class Cnc extends Component {
             }
             this.props.uploadImage(file, mode, () => {
                 modal({
-                    title: i18n._('Parse Image Error'),
-                    body: i18n._('Failed to parse image file {{}}', { filename: file.name })
+                    title: i18n._('Parse Error'),
+                    body: i18n._('Failed to parse image file {{}}.', { filename: file.name })
                 });
             });
         },
@@ -64,49 +67,49 @@ class Cnc extends Component {
 
         return (
             <div style={style}>
-                <Dropzone
-                    disabled={state.isDraggingWidget}
-                    accept={ACCEPT}
-                    dragEnterMsg={i18n._('Drop an image file here.')}
-                    onDropAccepted={this.actions.onDropAccepted}
-                    onDropRejected={this.actions.onDropRejected}
-                >
-                    <div className={styles['cnc-table']}>
-                        <div className={styles['cnc-table-row']}>
+                <div className={styles['cnc-table']}>
+                    <div className={styles['cnc-table-row']}>
+                        <Dropzone
+                            disabled={state.isDraggingWidget}
+                            accept={ACCEPT}
+                            dragEnterMsg={i18n._('Drop an image file here.')}
+                            onDropAccepted={this.actions.onDropAccepted}
+                            onDropRejected={this.actions.onDropRejected}
+                        >
                             <div className={styles['view-space']}>
                                 <CNCVisualizer />
                             </div>
-
-                            <form className={styles['control-bar']} noValidate>
-                                <Sortable
-                                    options={{
-                                        animation: 150,
-                                        delay: 0,
-                                        group: {
-                                            name: 'cnc-control'
-                                        },
-                                        handle: '.sortable-handle',
-                                        filter: '.sortable-filter',
-                                        chosenClass: 'sortable-chosen',
-                                        ghostClass: 'sortable-ghost',
-                                        dataIdAttr: 'data-widget-id',
-                                        onStart: this.actions.onDragWidgetStart,
-                                        onEnd: this.actions.onDragWidgetEnd
-                                    }}
-                                    onChange={this.actions.onChangeWidgetOrder}
-                                >
-                                    {widgets.map(widget => {
-                                        return (
-                                            <div data-widget-id={widget} key={widget}>
-                                                <Widget widgetId={widget} />
-                                            </div>
-                                        );
-                                    })}
-                                </Sortable>
-                            </form>
-                        </div>
+                        </Dropzone>
+                        <form className={styles['control-bar']} noValidate>
+                            <Sortable
+                                options={{
+                                    animation: 150,
+                                    delay: 0,
+                                    group: {
+                                        name: 'cnc-control'
+                                    },
+                                    handle: '.sortable-handle',
+                                    filter: '.sortable-filter',
+                                    chosenClass: 'sortable-chosen',
+                                    ghostClass: 'sortable-ghost',
+                                    dataIdAttr: 'data-widget-id',
+                                    onStart: this.actions.onDragWidgetStart,
+                                    onEnd: this.actions.onDragWidgetEnd
+                                }}
+                                onChange={this.actions.onChangeWidgetOrder}
+                            >
+                                {widgets.map(widget => {
+                                    return (
+                                        <div data-widget-id={widget} key={widget}>
+                                            <Widget widgetId={widget} headType="cnc" />
+                                        </div>
+                                    );
+                                })}
+                            </Sortable>
+                        </form>
+                        <CncToolManager />
                     </div>
-                </Dropzone>
+                </div>
             </div>
         );
     }
@@ -121,7 +124,7 @@ const mapStateToProps = (state) => {
 
 const mapDispatchToProps = (dispatch) => {
     return {
-        uploadImage: (file, mode, onFailure) => dispatch(cncLaserActions.uploadImage('cnc', file, mode, onFailure)),
+        uploadImage: (file, mode, onFailure) => dispatch(editorActions.uploadImage('cnc', file, mode, onFailure)),
         updateTabContainer: (widgets) => dispatch(widgetActions.updateTabContainer('cnc', 'default', widgets))
     };
 };

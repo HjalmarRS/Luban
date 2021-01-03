@@ -1,58 +1,57 @@
 import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
-import classNames from 'classnames';
 import { connect } from 'react-redux';
 
 import modal from '../../lib/modal';
 import i18n from '../../lib/i18n';
-import Anchor from '../../components/Anchor';
-import { actions as sharedActions } from '../../flux/cncLaserShared';
 import Modal from '../../components/Modal';
 import SvgTrace from '../CncLaserShared/SvgTrace';
-import ConfigRasterBW from './ConfigRasterBW';
-import ConfigGreyscale from './ConfigGreyscale';
-import ConfigRasterVector from './ConfigRasterVector';
-import ConfigSvgVector from './ConfigSvgVector';
 import TextParameters from '../CncLaserShared/TextParameters';
-// import ConfigSvgTrace from './ConfigSvgTrace';
 import Transformation from '../CncLaserShared/Transformation';
 import GcodeParameters from '../CncLaserShared/GcodeParameters';
-import api from '../../api';
-import { EXPERIMENTAL_IMAGE_TRACING } from '../../constants';
+import { PAGE_EDITOR, PAGE_PROCESS } from '../../constants';
 
-import styles from './styles.styl';
-
-
-const getAccept = (mode) => {
-    let accept = '';
-    if (['bw', 'greyscale'].includes(mode)) {
-        accept = '.png, .jpg, .jpeg, .bmp';
-    } else if (['vector', 'trace'].includes(mode)) {
-        accept = '.svg, .png, .jpg, .jpeg, .bmp, .dxf';
-    }
-    return accept;
-};
+import ImageProcessMode from './ImageProcessMode';
+import GcodeConfigVector from './gcodeconfig/GcodeConfigVector';
+import GcodeConfigRasterBW from './gcodeconfig/GcodeConfigRasterBW';
+import GcodeConfigGreyscale from './gcodeconfig/GcodeConfigGreyscale';
+// import GcodeConfigRasterVector from './gcodeconfig/GcodeConfigRasterVector';
+import { actions as editorActions } from '../../flux/editor';
 
 class LaserParameters extends PureComponent {
     static propTypes = {
         setTitle: PropTypes.func.isRequired,
 
+        page: PropTypes.string.isRequired,
+
         // model: PropTypes.object,
-        selectedModelID: PropTypes.string,
+        selectedModelArray: PropTypes.array,
+        selectedModelVisible: PropTypes.bool,
+        modelGroup: PropTypes.object,
         sourceType: PropTypes.string,
         mode: PropTypes.string.isRequired,
+        showOrigin: PropTypes.bool,
         config: PropTypes.object.isRequired,
         transformation: PropTypes.object.isRequired,
         gcodeConfig: PropTypes.object.isRequired,
         printOrder: PropTypes.number.isRequired,
+        headType: PropTypes.string,
+
+        setDisplay: PropTypes.func.isRequired,
+
         uploadImage: PropTypes.func.isRequired,
-        insertDefaultTextVector: PropTypes.func.isRequired,
         updateSelectedModelTransformation: PropTypes.func.isRequired,
+        updateSelectedModelUniformScalingState: PropTypes.func.isRequired,
         updateSelectedModelGcodeConfig: PropTypes.func.isRequired,
         updateSelectedModelPrintOrder: PropTypes.func.isRequired,
-        updateSelectedModelTextConfig: PropTypes.func.isRequired,
+        changeSelectedModelMode: PropTypes.func.isRequired,
         onModelAfterTransform: PropTypes.func.isRequired,
-        setAutoPreview: PropTypes.func.isRequired
+        togglePage: PropTypes.func.isRequired,
+        setAutoPreview: PropTypes.func.isRequired,
+        changeSelectedModelShowOrigin: PropTypes.func.isRequired,
+
+        // operator functions
+        modifyText: PropTypes.func.isRequired
     };
 
     fileInput = React.createRef();
@@ -83,63 +82,22 @@ class LaserParameters extends PureComponent {
     };
 
     actions = {
-        onClickToUpload: (mode) => {
-            this.setState({
-                uploadMode: mode,
-                accept: getAccept(mode)
-            }, () => {
-                this.fileInput.current.value = null;
-                this.fileInput.current.click();
-            });
-        },
-
-        processTrace: () => {
-            this.setState({
-                status: 'BUSY' // no use here
-            });
-            api.processTrace(this.state.options)
-                .then((res) => {
-                    this.setState({
-                        traceFilenames: res.body.filenames,
-                        status: 'IDLE',
-                        showModal: true
-                    });
-                });
-        },
         onChangeFile: (event) => {
             const file = event.target.files[0];
 
             const uploadMode = this.state.uploadMode;
-            if (uploadMode === 'trace') {
-                this.setState({
-                    mode: uploadMode
-                });
-                const formData = new FormData();
-                formData.append('image', file);
-                api.uploadImage(formData)
-                    .then(async (res) => {
-                        this.actions.updateOptions({
-                            originalName: res.body.originalName,
-                            uploadName: res.body.uploadName,
-                            width: res.body.width,
-                            height: res.body.height
-                        });
-                        await this.actions.processTrace();
-                    });
-            } else {
-                if (uploadMode === 'greyscale') {
-                    this.props.setAutoPreview(false);
-                }
-                this.props.uploadImage(file, uploadMode, () => {
-                    modal({
-                        title: i18n._('Parse Image Error'),
-                        body: i18n._('Failed to parse image file {{filename}}', { filename: file.name })
-                    });
-                });
+            this.props.togglePage(PAGE_EDITOR);
+
+            if (uploadMode === 'greyscale') {
+                this.props.setAutoPreview(false);
             }
-        },
-        onClickInsertText: () => {
-            this.props.insertDefaultTextVector();
+
+            this.props.uploadImage(file, uploadMode, () => {
+                modal({
+                    title: i18n._('Parse Error'),
+                    body: i18n._('Failed to parse image file {{filename}}.', { filename: file.name })
+                });
+            });
         },
         updateOptions: (options) => {
             this.setState({
@@ -166,26 +124,49 @@ class LaserParameters extends PureComponent {
 
     constructor(props) {
         super(props);
-        this.props.setTitle(i18n._('Preview Settings'));
+        this.props.setTitle(i18n._('Configurations'));
+    }
+
+    componentDidMount() {
+        const { modelGroup } = this.props;
+        if (modelGroup.getSelectedModelArray().length > 0) {
+            this.props.setDisplay(true);
+        } else {
+            this.props.setDisplay(false);
+        }
+    }
+
+    componentWillReceiveProps(nextProps) {
+        const { modelGroup } = nextProps;
+        if (modelGroup.getSelectedModelArray().length > 0) {
+            this.props.setDisplay(true);
+        } else {
+            this.props.setDisplay(false);
+        }
     }
 
     render() {
         const { accept } = this.state;
         const {
-            selectedModelID, sourceType, mode,
-            transformation, updateSelectedModelTransformation,
+            selectedModelArray, selectedModelVisible, modelGroup, sourceType, mode,
+            updateSelectedModelTransformation,
             gcodeConfig, updateSelectedModelGcodeConfig,
-            printOrder, updateSelectedModelPrintOrder, config, updateSelectedModelTextConfig,
-            onModelAfterTransform
+            printOrder, updateSelectedModelPrintOrder, config,
+            changeSelectedModelMode, showOrigin, changeSelectedModelShowOrigin,
+            onModelAfterTransform, headType, updateSelectedModelUniformScalingState, transformation,
+            modifyText
         } = this.props;
+
         const actions = this.actions;
         const { width, height } = this.state.modalSetting;
 
-        const isBW = (sourceType === 'raster' && mode === 'bw');
-        const isGreyscale = (sourceType === 'raster' && mode === 'greyscale');
-        const isRasterVector = (sourceType === 'raster' && mode === 'vector');
-        const isSvgVector = ((sourceType === 'svg' || sourceType === 'dxf') && mode === 'vector');
-        const isTextVector = (sourceType === 'text' && mode === 'vector');
+        const isEditor = this.props.page === PAGE_EDITOR;
+        const isProcess = this.props.page === PAGE_PROCESS;
+        const isBW = (mode === 'bw' || mode === 'halftone');
+        const isGreyscale = (mode === 'greyscale');
+        const isVector = mode === 'vector';
+        const isTextVector = (config.svgNodeName === 'text');
+        const showImageProcessMode = (sourceType === 'raster' || sourceType === 'svg') && config.svgNodeName === 'image';
 
         return (
             <React.Fragment>
@@ -214,93 +195,64 @@ class LaserParameters extends PureComponent {
                         </Modal.Body>
                     </Modal>
                 )}
-                <div className={styles['laser-modes']}>
-                    <div className={classNames(styles['laser-mode'])}>
-                        <Anchor
-                            className={styles['laser-mode__btn']}
-                            onClick={() => actions.onClickToUpload('bw')}
-                        >
-                            <i className={styles['laser-mode__icon-bw']} />
-                        </Anchor>
-                        <span className={styles['laser-mode__text']}>{i18n._('B&W')}</span>
-                    </div>
-                    <div className={classNames(styles['laser-mode'])}>
-                        <Anchor
-                            className={styles['laser-mode__btn']}
-                            onClick={() => actions.onClickToUpload('greyscale')}
-                        >
-                            <i className={styles['laser-mode__icon-greyscale']} />
-                        </Anchor>
-                        <span className={styles['laser-mode__text']}>{i18n._('GREYSCALE')}</span>
-                    </div>
-                    <div className={classNames(styles['laser-mode'])}>
-                        <Anchor
-                            className={styles['laser-mode__btn']}
-                            onClick={() => actions.onClickToUpload('vector')}
-                        >
-                            <i className={styles['laser-mode__icon-vector']} />
-                        </Anchor>
-                        <span className={styles['laser-mode__text']}>{i18n._('VECTOR')}</span>
-                    </div>
-                    <div className={classNames(styles['laser-mode'])} style={{ marginRight: '0' }}>
-                        <Anchor
-                            className={classNames(styles['laser-mode__btn'])}
-                            onClick={() => actions.onClickInsertText()}
-                        >
-                            <i className={styles['laser-mode__icon-text']} />
-                        </Anchor>
-                        <span className={styles['laser-mode__text']}>{i18n._('TEXT')}</span>
-                    </div>
-                    {EXPERIMENTAL_IMAGE_TRACING && (
-                        <div className={classNames(styles['laser-mode'])}>
-                            <Anchor
-                                className={styles['laser-mode__btn']}
-                                onClick={() => actions.onClickToUpload('trace')}
-                            >
-                                <i className={styles['laser-mode__icon-vector']} />
-                            </Anchor>
-                            <span className={styles['laser-mode__text']}>{i18n._('TRACE')}</span>
-                        </div>
-                    )}
-                </div>
-                {selectedModelID && (
-                    <div>
-                        <div className={styles.separator} />
-                        <Transformation
-                            sourceType={sourceType}
-                            transformation={transformation}
-                            updateSelectedModelTransformation={updateSelectedModelTransformation}
-                            onModelAfterTransform={onModelAfterTransform}
-                        />
-                        <div style={{ marginTop: '15px' }}>
-                            {isBW && <ConfigRasterBW />}
-                            {isGreyscale && <ConfigGreyscale />}
-                            {isRasterVector && <ConfigRasterVector />}
-                            {isSvgVector && <ConfigSvgVector />}
-                            {isTextVector && (
-                                <TextParameters
-                                    config={config}
-                                    updateSelectedModelTextConfig={updateSelectedModelTextConfig}
-                                />
-                            )}
-                            {isTextVector && (
-                                <ConfigSvgVector />
-                            )}
-                        </div>
-                        <GcodeParameters
-                            printOrder={printOrder}
-                            gcodeConfig={gcodeConfig}
-                            updateSelectedModelPrintOrder={updateSelectedModelPrintOrder}
-                            updateSelectedModelGcodeConfig={updateSelectedModelGcodeConfig}
-                            paramsDescs={
-                                {
-                                    jogSpeed: i18n._('Determines how fast the machine moves when it’s not engraving.'),
-                                    workSpeed: i18n._('Determines how fast the machine moves when it’s engraving.'),
-                                    dwellTime: i18n._('Determines how long the laser keeps on when it’s engraving a dot.')
-                                }
+                {isEditor && (
+                    <Transformation
+                        selectedModelArray={selectedModelArray}
+                        selectedModelVisible={selectedModelVisible}
+                        modelGroup={modelGroup}
+                        sourceType={sourceType}
+                        transformation={transformation}
+                        headType={headType}
+                        onModelAfterTransform={onModelAfterTransform}
+                        updateSelectedModelTransformation={updateSelectedModelTransformation}
+                        updateSelectedModelUniformScalingState={updateSelectedModelUniformScalingState}
+                    />
+                )}
+                {isEditor && showImageProcessMode && (selectedModelArray.length === 1) && (
+                    <ImageProcessMode
+                        disabled={!selectedModelVisible}
+                        sourceType={sourceType}
+                        mode={mode}
+                        showOrigin={showOrigin}
+                        changeSelectedModelShowOrigin={changeSelectedModelShowOrigin}
+                        changeSelectedModelMode={changeSelectedModelMode}
+                    />
+                )}
+
+                {isEditor && isTextVector && (selectedModelArray.length === 1) && (
+                    <TextParameters
+                        disabled={!selectedModelVisible}
+                        headType={headType}
+                        config={config}
+                        modifyText={modifyText}
+                    />
+                )}
+                {isProcess && isBW && (selectedModelArray && selectedModelArray.length === 1) && (
+                    <GcodeConfigRasterBW disabled={!selectedModelVisible} />
+                )}
+                {isProcess && isGreyscale && (selectedModelArray && selectedModelArray.length === 1) && (
+                    <GcodeConfigGreyscale disabled={!selectedModelVisible} />
+                )}
+                {isProcess && (isVector || isTextVector) && (selectedModelArray && selectedModelArray.length === 1) && (
+                    <GcodeConfigVector disabled={!selectedModelVisible} />
+                )}
+
+                {isProcess && (
+                    <GcodeParameters
+                        selectedModelVisible={selectedModelVisible}
+                        selectedModelArray={selectedModelArray}
+                        printOrder={printOrder}
+                        gcodeConfig={gcodeConfig}
+                        updateSelectedModelPrintOrder={updateSelectedModelPrintOrder}
+                        updateSelectedModelGcodeConfig={updateSelectedModelGcodeConfig}
+                        paramsDescs={
+                            {
+                                jogSpeed: i18n._('Determines how fast the machine moves when it’s not engraving.'),
+                                workSpeed: i18n._('Determines how fast the machine moves when it’s engraving.'),
+                                dwellTime: i18n._('Determines how long the laser keeps on when it’s engraving a dot.')
                             }
-                        />
-                    </div>
+                        }
+                    />
                 )}
             </React.Fragment>
         );
@@ -308,33 +260,66 @@ class LaserParameters extends PureComponent {
 }
 
 const mapStateToProps = (state) => {
-    // const { model, transformation, gcodeConfig, printOrder, config } = state.laser;
-    // const sourceType = model ? model.modelInfo.source.type : '';
-    // const mode = model ? model.modelInfo.mode : '';
-    const { selectedModelID, sourceType, mode, transformation, gcodeConfig, printOrder, config } = state.laser;
-
+    const { page, modelGroup, toolPathModelGroup, printOrder } = state.laser;
+    const gcodeConfig = toolPathModelGroup.getSelectedModel().gcodeConfig;
+    const selectedModelArray = modelGroup.getSelectedModelArray();
+    const selectedModel = ((selectedModelArray && selectedModelArray.length > 0) ? selectedModelArray[0] : {
+        // modelGroup.mockModel
+        mock: true,
+        sourceType: '',
+        mode: '',
+        config: {},
+        visible: true,
+        transformation: {
+            rotationZ: 0,
+            width: 0,
+            height: 0,
+            positionX: 0,
+            positionY: 0,
+            flip: 0
+        }
+    });
+    const {
+        mode,
+        sourceType,
+        showOrigin,
+        transformation,
+        config,
+        visible
+    } = selectedModel;
     return {
+        page,
         printOrder,
         transformation,
         gcodeConfig,
-        // model,
-        selectedModelID,
+        selectedModelArray,
+        selectedModel,
+        // todo, next version fix like selectedModelID
+        selectedModelVisible: visible,
+        modelGroup,
         sourceType,
         mode,
+        showOrigin,
         config
     };
 };
 
 const mapDispatchToProps = (dispatch) => {
     return {
-        uploadImage: (file, mode, onFailure) => dispatch(sharedActions.uploadImage('laser', file, mode, onFailure)),
-        insertDefaultTextVector: () => dispatch(sharedActions.insertDefaultTextVector('laser')),
-        updateSelectedModelTransformation: (params) => dispatch(sharedActions.updateSelectedModelTransformation('laser', params)),
-        updateSelectedModelGcodeConfig: (params) => dispatch(sharedActions.updateSelectedModelGcodeConfig('laser', params)),
-        updateSelectedModelTextConfig: (config) => dispatch(sharedActions.updateSelectedModelTextConfig('laser', config)),
-        updateSelectedModelPrintOrder: (printOrder) => dispatch(sharedActions.updateSelectedModelPrintOrder('laser', printOrder)),
-        onModelAfterTransform: () => dispatch(sharedActions.onModelAfterTransform('laser')),
-        setAutoPreview: (value) => dispatch(sharedActions.setAutoPreview('laser', value))
+        togglePage: (page) => dispatch(editorActions.togglePage('laser', page)),
+        uploadImage: (file, mode, onFailure) => dispatch(editorActions.uploadImage('laser', file, mode, onFailure)),
+        insertDefaultTextVector: () => dispatch(editorActions.insertDefaultTextVector('laser')),
+        updateSelectedModelTransformation: (params, changeFrom) => dispatch(editorActions.updateSelectedModelTransformation('laser', params, changeFrom)),
+        updateSelectedModelUniformScalingState: (params) => dispatch(editorActions.updateSelectedModelTransformation('laser', params)),
+        updateSelectedModelFlip: (params) => dispatch(editorActions.updateSelectedModelFlip('laser', params)),
+        updateSelectedModelGcodeConfig: (params) => dispatch(editorActions.updateSelectedModelGcodeConfig('laser', params)),
+        updateSelectedModelPrintOrder: (printOrder) => dispatch(editorActions.updateSelectedModelPrintOrder('laser', printOrder)),
+        changeSelectedModelShowOrigin: () => dispatch(editorActions.changeSelectedModelShowOrigin('laser')),
+        changeSelectedModelMode: (sourceType, mode) => dispatch(editorActions.changeSelectedModelMode('laser', sourceType, mode)),
+        onModelAfterTransform: () => {},
+        setAutoPreview: (value) => dispatch(editorActions.setAutoPreview('laser', value)),
+
+        modifyText: (element, options) => dispatch(editorActions.modifyText('laser', element, options))
     };
 };
 

@@ -6,13 +6,13 @@ import Select from 'react-select';
 import isEqual from 'lodash/isEqual';
 import { NumberInput } from '../../../components/Input';
 import i18n from '../../../lib/i18n';
-import { actions } from '../../../flux/machine';
+import { actions as machineActions } from '../../../flux/machine';
 import styles from '../form.styl';
 import { MACHINE_SERIES } from '../../../constants';
 
 
 const customOption = {
-    value: 'custom',
+    value: 'Custom',
     label: 'Custom',
     setting: {
         size: {
@@ -47,11 +47,14 @@ class MachineSettings extends PureComponent {
         size: PropTypes.object.isRequired,
         updateMachineSize: PropTypes.func.isRequired,
 
-        enclosure: PropTypes.bool.isRequired,
+        enclosureDoorDetection: PropTypes.bool.isRequired,
+        zAxisModule: PropTypes.number,
         connectionTimeout: PropTypes.number.isRequired,
         getEnclosureState: PropTypes.func.isRequired,
         setEnclosureState: PropTypes.func.isRequired,
-        updateConnectionTimeout: PropTypes.func.isRequired
+        getZAxisModuleState: PropTypes.func.isRequired,
+        setZAxisModuleState: PropTypes.func.isRequired,
+        setConnectionTimeout: PropTypes.func.isRequired
     };
 
     state = {
@@ -61,7 +64,8 @@ class MachineSettings extends PureComponent {
             y: 0,
             z: 0
         },
-        enclosure: false,
+        enclosureDoorDetection: false,
+        zAxisModule: null,
         connectionTimeout: 3000
     };
 
@@ -107,7 +111,14 @@ class MachineSettings extends PureComponent {
         // Enclosure
         onChangeEnclosureState: (option) => {
             this.setState({
-                enclosure: option.value
+                enclosureDoorDetection: option.value
+            });
+        },
+
+        // Extension z-axis module select
+        onChangeZAxisModuleState: (option) => {
+            this.setState({
+                zAxisModule: option.value
             });
         },
 
@@ -122,15 +133,18 @@ class MachineSettings extends PureComponent {
             this.setState({
                 series: this.props.series,
                 size: this.props.size,
-                enclosure: this.props.enclosure,
+                enclosureDoorDetection: this.props.enclosureDoorDetection,
+                zAxisModule: this.props.zAxisModule,
                 connectionTimeout: this.props.connectionTimeout
             });
         },
         onSave: () => {
             this.props.updateMachineSeries(this.state.series);
             this.props.updateMachineSize(this.state.size);
-            this.props.setEnclosureState(this.state.enclosure);
-            this.props.updateConnectionTimeout(this.state.connectionTimeout);
+            this.props.setEnclosureState(this.state.enclosureDoorDetection);
+            this.props.setZAxisModuleState(this.state.zAxisModule);
+
+            this.props.setConnectionTimeout(this.state.connectionTimeout);
         }
     };
 
@@ -139,12 +153,14 @@ class MachineSettings extends PureComponent {
 
         this.state.series = props.series;
         this.state.size = props.size;
-        this.state.enclosure = props.enclosure;
+        this.state.enclosureDoorDetection = props.enclosureDoorDetection;
+        this.state.zAxisModule = props.zAxisModule;
         this.state.connectionTimeout = props.connectionTimeout;
     }
 
     componentDidMount() {
         this.props.getEnclosureState();
+        this.props.getZAxisModuleState();
     }
 
     componentWillReceiveProps(nextProps) {
@@ -156,8 +172,12 @@ class MachineSettings extends PureComponent {
             this.setState({ size: nextProps.size });
         }
 
-        if (!isEqual(nextProps.enclosure, this.state.enclosure)) {
-            this.setState({ enclosure: nextProps.enclosure });
+        if (!isEqual(nextProps.enclosureDoorDetection, this.state.enclosureDoorDetection)) {
+            this.setState({ enclosureDoorDetection: nextProps.enclosureDoorDetection });
+        }
+
+        if (!isEqual(nextProps.zAxisModule, this.state.zAxisModule)) {
+            this.setState({ zAxisModule: nextProps.zAxisModule });
         }
 
         if (!isEqual(nextProps.connectionTimeout, this.state.connectionTimeout)) {
@@ -166,7 +186,7 @@ class MachineSettings extends PureComponent {
     }
 
     render() {
-        const options = [
+        const doorDetectionOptions = [
             {
                 value: true,
                 label: i18n._('On')
@@ -176,14 +196,25 @@ class MachineSettings extends PureComponent {
                 label: i18n._('Off')
             }
         ];
+        const zAxisModuleOptions = [
+            {
+                value: 0,
+                label: i18n._('Standard Module')
+            },
+            {
+                value: 1,
+                label: i18n._('Extension Module')
+            }
+        ];
 
         const stateChanged = (this.state.series !== this.props.series)
             || !isEqual(this.props.size, this.state.size)
-            || !isEqual(this.props.enclosure, this.state.enclosure)
+            || !isEqual(this.props.enclosureDoorDetection, this.state.enclosureDoorDetection)
+            || !isEqual(this.props.zAxisModule, this.state.zAxisModule)
             || !isEqual(this.props.connectionTimeout, this.state.connectionTimeout);
 
-        const { series, size, enclosure, connectionTimeout } = this.state;
-        const editable = (this.state.series === 'custom');
+        const { series, size, enclosureDoorDetection, zAxisModule, connectionTimeout } = this.state;
+        const editable = (this.state.series === 'Custom');
         const isConnected = this.props.isConnected;
 
         return (
@@ -195,7 +226,7 @@ class MachineSettings extends PureComponent {
                             clearable={false}
                             searchable={false}
                             disabled={isConnected}
-                            name={i18n._('- Please Select -')}
+                            name="select-machine"
                             options={machineSeriesOptions}
                             value={series}
                             onChange={this.actions.onChangeMachineSeries}
@@ -242,16 +273,30 @@ class MachineSettings extends PureComponent {
                         <Select
                             clearable={false}
                             searchable={false}
-                            name={i18n._('Door detection')}
-                            options={options}
-                            value={enclosure}
+                            name={i18n._('Door Detection')}
+                            options={doorDetectionOptions}
+                            value={enclosureDoorDetection}
                             onChange={this.actions.onChangeEnclosureState}
+                        />
+                    </div>
+                </div>
+                <p className={styles['form-title']}>{i18n._('Module')}</p>
+                <div className={styles['form-group']}>
+                    <span>{i18n._('Z-Axis Module')}</span>
+                    <div className={classNames(styles['form-control'], styles.short)}>
+                        <Select
+                            clearable={false}
+                            searchable={false}
+                            name={i18n._('Z-Axis Module')}
+                            options={zAxisModuleOptions}
+                            value={zAxisModule}
+                            onChange={this.actions.onChangeZAxisModuleState}
                         />
                     </div>
                 </div>
                 <p className={styles['form-title']}>{i18n._('Connection')}</p>
                 <div className={styles['form-group']}>
-                    <span>{i18n._('Time Out')}</span>
+                    <span>{i18n._('Timeout')}</span>
                     <div className={classNames(styles['form-control'], styles.short)}>
                         <Select
                             clearable={false}
@@ -260,15 +305,15 @@ class MachineSettings extends PureComponent {
                             options={[
                                 {
                                     value: 3000,
-                                    label: i18n._('3s')
+                                    label: '3s'
                                 },
                                 {
                                     value: 15000,
-                                    label: i18n._('15s')
+                                    label: '15s'
                                 },
                                 {
                                     value: 30000,
-                                    label: i18n._('30s')
+                                    label: '30s'
                                 }
                             ]}
                             value={connectionTimeout}
@@ -307,24 +352,27 @@ class MachineSettings extends PureComponent {
 const mapStateToProps = (state) => {
     const machine = state.machine;
 
-    const { series, size, enclosure, isConnected, connectionTimeout } = machine;
+    const { series, size, enclosureDoorDetection, zAxisModule, isConnected, connectionTimeout } = machine;
 
     return {
         series,
         isConnected,
+        zAxisModule,
         size,
-        enclosure,
+        enclosureDoorDetection,
         connectionTimeout
     };
 };
 
 const mapDispatchToProps = (dispatch) => {
     return {
-        updateMachineSeries: (series) => dispatch(actions.updateMachineSeries(series)),
-        updateMachineSize: (size) => dispatch(actions.updateMachineSize(size)),
-        getEnclosureState: () => dispatch(actions.getEnclosureState()),
-        setEnclosureState: (on) => dispatch(actions.setEnclosureState(on)),
-        updateConnectionTimeout: (time) => dispatch(actions.updateConnectionTimeout(time))
+        updateMachineSeries: (series) => dispatch(machineActions.updateMachineSeries(series)),
+        updateMachineSize: (size) => dispatch(machineActions.updateMachineSize(size)),
+        getEnclosureState: () => dispatch(machineActions.getEnclosureState()),
+        setEnclosureState: (on) => dispatch(machineActions.setEnclosureState(on)),
+        getZAxisModuleState: () => dispatch(machineActions.getZAxisModuleState()),
+        setZAxisModuleState: (moduleId) => dispatch(machineActions.setZAxisModuleState(moduleId)),
+        setConnectionTimeout: (connectionTimeout) => dispatch(machineActions.connect.setConnectionType(connectionTimeout))
     };
 };
 

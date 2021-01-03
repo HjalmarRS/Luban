@@ -3,16 +3,17 @@ import fs from 'fs';
 import mkdirp from 'mkdirp';
 import { app } from 'electron';
 import isElectron from 'is-electron';
-import semver from 'semver';
+// import semver from 'semver';
+import { CNC_CONFIG_SUBCATEGORY } from './constants';
 import logger from './lib/logger';
 import { initFonts } from './lib/FontManager';
-import settings from './config/settings';
+// import settings from './config/settings';
 
 
 const log = logger('server:DataStorage');
 
 
-const rmDir = (dirPath, removeSelf) => {
+export const rmDir = (dirPath, removeSelf) => {
     log.info(`Clearing folder ${dirPath}`);
     if (removeSelf === undefined) {
         removeSelf = true;
@@ -43,149 +44,141 @@ const rmDir = (dirPath, removeSelf) => {
 
 
 class DataStorage {
-    static userDataDir;
+     userDataDir;
 
-    static sessionDir;
+     sessionDir;
 
-    static tmpDir;
+     tmpDir;
 
-    static configDir;
+     configDir;
 
-    static fontDir;
+     fontDir;
 
-    static userCaseDir;
+     userCaseDir;
 
-    static async init() {
-        if (isElectron()) {
-            this.userDataDir = app.getPath('userData');
-        } else {
-            this.userDataDir = './userData';
-        }
-        mkdirp.sync(this.userDataDir);
+     envDir;
 
-        this.sessionDir = `${this.userDataDir}/Sessions`;
-        this.tmpDir = `${this.userDataDir}/Tmp`;
-        this.configDir = `${this.userDataDir}/Config`;
-        this.fontDir = `${this.userDataDir}/Fonts`;
-        this.userCaseDir = `${this.userDataDir}/UserCase`;
+     constructor() {
+         if (isElectron()) {
+             this.userDataDir = app.getPath('userData');
+         } else {
+             this.userDataDir = './userData';
+         }
+         mkdirp.sync(this.userDataDir);
 
-        mkdirp.sync(this.tmpDir);
-        mkdirp.sync(this.sessionDir);
-        rmDir(this.tmpDir, false);
-        rmDir(this.sessionDir, false);
+         this.sessionDir = `${this.userDataDir}/Sessions`;
+         this.tmpDir = `${this.userDataDir}/Tmp`;
+         this.configDir = `${this.userDataDir}/Config`;
+         this.fontDir = `${this.userDataDir}/Fonts`;
+         this.userCaseDir = `${this.userDataDir}/UserCase`;
+         this.envDir = `${this.userDataDir}/env`;
+     }
 
-        this.initSlicer();
+     async init() {
+         mkdirp.sync(this.envDir);
+         mkdirp.sync(`${this.envDir}/3dp`);
+         mkdirp.sync(`${this.envDir}/laser`);
+         mkdirp.sync(`${this.envDir}/cnc`);
 
-        await this.initFonts();
-        await this.initUserCase();
-        await this.versionAdaptation();
-    }
+         mkdirp.sync(this.tmpDir);
+         mkdirp.sync(this.sessionDir);
+         rmDir(this.tmpDir, false);
+         rmDir(this.sessionDir, false);
 
-    static async initSlicer() {
-        mkdirp.sync(this.configDir);
+         await this.initSlicer();
 
-        const CURA_ENGINE_CONFIG_LOCAL = '../resources/CuraEngine/Config';
-        if (fs.existsSync(CURA_ENGINE_CONFIG_LOCAL)) {
-            const files = fs.readdirSync(CURA_ENGINE_CONFIG_LOCAL);
-            for (const file of files) {
-                const src = path.join(CURA_ENGINE_CONFIG_LOCAL, file);
-                const dst = path.join(this.configDir, file);
-                if (fs.statSync(src)
-                    .isFile()) {
-                    fs.copyFileSync(src, dst, () => {
-                    });
-                } else {
-                    const srcPath = `${CURA_ENGINE_CONFIG_LOCAL}/${file}`;
-                    const dstPath = `${this.configDir}/${file}`;
-                    await this.copyDir(srcPath, dstPath);
-                }
-            }
-        }
-    }
+         await this.initFonts();
+         await this.initUserCase();
+         //  await this.versionAdaptation();
+     }
 
-    static async initFonts() {
-        mkdirp.sync(this.fontDir);
+     async initSlicer() {
+         mkdirp.sync(this.configDir);
+         mkdirp.sync(`${this.configDir}/${CNC_CONFIG_SUBCATEGORY}`);
 
-        const FONTS_LOCAL = '../resources/fonts';
-        if (fs.existsSync(FONTS_LOCAL)) {
-            const files = fs.readdirSync(FONTS_LOCAL);
-            for (const file of files) {
-                const src = path.join(FONTS_LOCAL, file);
-                const dst = path.join(this.fontDir, file);
-                if (fs.statSync(src)
-                    .isFile()) {
-                    fs.copyFileSync(src, dst, () => {
-                    });
-                }
-            }
-        }
-        await initFonts(this.fontDir);
-    }
+         const CURA_ENGINE_CONFIG_LOCAL = '../resources/CuraEngine/Config';
+         if (fs.existsSync(CURA_ENGINE_CONFIG_LOCAL)) {
+             const files = fs.readdirSync(CURA_ENGINE_CONFIG_LOCAL);
+             for (const file of files) {
+                 const src = path.join(CURA_ENGINE_CONFIG_LOCAL, file);
+                 const dst = path.join(this.configDir, file);
+                 if (fs.statSync(src)
+                     .isFile()) {
+                     fs.copyFileSync(src, dst, () => {
+                     });
+                 } else {
+                     const srcPath = `${CURA_ENGINE_CONFIG_LOCAL}/${file}`;
+                     const dstPath = `${this.configDir}/${file}`;
+                     await this.copyDir(srcPath, dstPath);
+                 }
+             }
+         }
+     }
 
-    static async initUserCase() {
-        mkdirp.sync(this.userCaseDir);
+     async initFonts() {
+         mkdirp.sync(this.fontDir);
 
-        const USER_CASE_LOCAL = '../resources/user-case';
-        if (fs.existsSync(USER_CASE_LOCAL)) {
-            const files = fs.readdirSync(USER_CASE_LOCAL);
-            for (const file of files) {
-                const src = path.join(USER_CASE_LOCAL, file);
-                const dst = path.join(this.userCaseDir, file);
-                if (fs.statSync(src)
-                    .isFile()) {
-                    fs.copyFileSync(src, dst);
-                } else {
-                    const srcPath = `${USER_CASE_LOCAL}/${file}`;
-                    const dstPath = `${this.userCaseDir}/${file}`;
-                    await this.copyDir(srcPath, dstPath);
-                }
-            }
-        }
-    }
+         const FONTS_LOCAL = '../resources/fonts';
+         if (fs.existsSync(FONTS_LOCAL)) {
+             const files = fs.readdirSync(FONTS_LOCAL);
+             for (const file of files) {
+                 const src = path.join(FONTS_LOCAL, file);
+                 const dst = path.join(this.fontDir, file);
+                 if (fs.statSync(src)
+                     .isFile()) {
+                     fs.copyFileSync(src, dst, () => {
+                     });
+                 }
+             }
+         }
+         await initFonts(this.fontDir);
+     }
 
-    static async copyDir(src, dst) {
-        mkdirp.sync(dst);
+     async initUserCase() {
+         mkdirp.sync(this.userCaseDir);
 
-        if (fs.existsSync(src)) {
-            const files = fs.readdirSync(src);
-            for (const file of files) {
-                const srcPath = path.join(src, file);
-                const dstPath = path.join(dst, file);
-                if (fs.statSync(srcPath)
-                    .isFile()) {
-                    fs.copyFileSync(srcPath, dstPath);
-                }
-            }
-        }
-    }
+         const USER_CASE_LOCAL = '../resources/user-case';
+         if (fs.existsSync(USER_CASE_LOCAL)) {
+             const files = fs.readdirSync(USER_CASE_LOCAL);
+             for (const file of files) {
+                 const src = path.join(USER_CASE_LOCAL, file);
+                 const dst = path.join(this.userCaseDir, file);
+                 if (fs.statSync(src)
+                     .isFile()) {
+                     fs.copyFileSync(src, dst);
+                 } else {
+                     const srcPath = `${USER_CASE_LOCAL}/${file}`;
+                     const dstPath = `${this.userCaseDir}/${file}`;
+                     await this.copyDir(srcPath, dstPath);
+                 }
+             }
+         }
+     }
 
-    static async copyFile(src, dst, isCover = true) {
-        if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
-            return;
-        }
-        if (!isCover && fs.existsSync(dst)) {
-            return;
-        }
-        fs.copyFileSync(src, dst);
-    }
+     async copyDir(src, dst) {
+         mkdirp.sync(dst);
 
-    static async versionAdaptation() {
-        if (semver.gte(settings.version, '3.3.0')) {
-            log.info(settings.version);
-            const files = fs.readdirSync(this.configDir);
-            for (const file of files) {
-                if (file.indexOf('quality') !== -1) {
-                    const src = path.join(this.configDir, file);
-                    const dstA150 = path.join(`${this.configDir}/A150`, file);
-                    const dstA250 = path.join(`${this.configDir}/A250`, file);
-                    const dstA350 = path.join(`${this.configDir}/A350`, file);
-                    await this.copyFile(src, dstA150, false);
-                    await this.copyFile(src, dstA250, false);
-                    await this.copyFile(src, dstA350, false);
-                }
-            }
-        }
-    }
+         if (fs.existsSync(src)) {
+             const files = fs.readdirSync(src);
+             for (const file of files) {
+                 const srcPath = path.join(src, file);
+                 const dstPath = path.join(dst, file);
+                 if (fs.statSync(srcPath).isFile()) {
+                     fs.copyFileSync(srcPath, dstPath);
+                 }
+             }
+         }
+     }
+
+     async copyFile(src, dst, isCover = true) {
+         if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
+             return;
+         }
+         if (!isCover && fs.existsSync(dst)) {
+             return;
+         }
+         fs.copyFileSync(src, dst);
+     }
 }
 
-export default DataStorage;
+export default new DataStorage();

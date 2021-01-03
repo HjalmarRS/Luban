@@ -5,7 +5,6 @@ import classNames from 'classnames';
 import log from '../../lib/log';
 import styles from './styles.styl';
 
-
 class NumberInput extends PureComponent {
     static propTypes = {
         className: PropTypes.string,
@@ -15,6 +14,8 @@ class NumberInput extends PureComponent {
         max: PropTypes.number,
         onChange: PropTypes.func
     };
+
+    ref = React.createRef();
 
     constructor(props) {
         super(props);
@@ -67,6 +68,10 @@ class NumberInput extends PureComponent {
         }
     };
 
+    onFocus=() => {
+        this.ref.current.select();
+    };
+
     onAfterChangeWrapper(value) {
         const { min, max, onChange } = this.props;
 
@@ -77,7 +82,7 @@ class NumberInput extends PureComponent {
         if (Number.isNaN(numericValue)) {
             const absentValue = this.getAbsentValue();
             onChange(absentValue);
-            this.onChange(absentValue);
+            this.onChange({ target: { value: absentValue } });
             return;
         }
 
@@ -114,6 +119,7 @@ class NumberInput extends PureComponent {
 
         return (
             <input
+                ref={this.ref}
                 {...rest}
                 type="number"
                 value={this.state.displayValue}
@@ -121,6 +127,7 @@ class NumberInput extends PureComponent {
                 onChange={this.onChange}
                 onBlur={this.onBlur}
                 onKeyUp={this.onKeyUp}
+                onFocus={this.onFocus}
             />
         );
     }

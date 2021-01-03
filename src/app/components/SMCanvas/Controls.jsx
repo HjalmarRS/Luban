@@ -9,6 +9,7 @@ import EventEmitter from 'events';
 import TransformControls from './TransformControls';
 import TransformControls2D from './TransformControls2D';
 // const EPSILON = 0.000001;
+import { SELECTEVENT } from '../../constants';
 
 const EPS = 0.000001;
 
@@ -17,15 +18,16 @@ const STATE = {
     ROTATE: 0,
     DOLLY: 1,
     PAN: 2,
-    TRANSFORM: 3
+    TRANSFORM: 3,
+    SUPPORT: 4
 };
 
 // Events sent by Controls
 export const EVENTS = {
     UPDATE: 'update',
     CONTEXT_MENU: 'contextmenu',
-    SELECT_OBJECT: 'object:select',
-    UNSELECT_OBJECT: 'object:unselect',
+    SELECT_OBJECTS: 'object:select',
+    // UNSELECT_OBJECT: 'object:unselect',
     TRANSFORM_OBJECT: 'object:transform',
     AFTER_TRANSFORM_OBJECT: 'object:aftertransform'
 };
@@ -34,6 +36,7 @@ class Controls extends EventEmitter {
     camera = null;
 
     group = null;
+
 
     domElement = null;
 
@@ -78,22 +81,35 @@ class Controls extends EventEmitter {
     // detection
     selectableObjects = null;
 
-    selectedObject = null;
+    shouldForbidSelect = false;
+
+    modelGroup = null;
+
+    selectedGroup = null;
 
     ray = new THREE.Raycaster();
 
-    constructor(sourceType, camera, group, domElement) {
+    horizontalPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+    // Track if mouse moved during "mousedown" to "mouseup".
+    mouseDownPosition = null;
+
+    constructor(sourceType, camera, group, domElement, onScale, onPan, supportActions) {
         super();
 
         this.sourceType = sourceType;
         this.camera = camera;
         this.group = group;
         this.domElement = (domElement !== undefined) ? domElement : document;
+        this.onScale = onScale;
+        this.onPan = onPan;
 
         this.initTransformControls();
+        this.supportActions = supportActions;
 
         this.bindEventListeners();
     }
+
 
     initTransformControls() {
         if (this.sourceType === '3D') {
@@ -125,6 +141,7 @@ class Controls extends EventEmitter {
         this.domElement.addEventListener('mousedown', this.onMouseDown, false);
         this.domElement.addEventListener('mousemove', this.onMouseHover, false);
         this.domElement.addEventListener('wheel', this.onMouseWheel, false);
+        this.domElement.addEventListener('click', this.onClick, false);
 
         document.addEventListener('contextmenu', this.onDocumentContextMenu, false);
     }
@@ -168,6 +185,10 @@ class Controls extends EventEmitter {
         this.panUp(distance * deltaY / elem.clientHeight, this.camera.matrix);
     }
 
+    setScale(scale) {
+        this.scale = scale;
+    }
+
     dollyIn = () => {
         this.scale *= this.scaleRate;
     };
@@ -190,31 +211,26 @@ class Controls extends EventEmitter {
     onMouseDown = (event) => {
         // Prevent the browser from scrolling.
         event.preventDefault();
+        this.mouseDownPosition = this.getMouseCoord(event);
+        // mousedown on support mode
+        this.prevState = null;
+        if (this.state === STATE.SUPPORT) {
+            this.prevState = STATE.SUPPORT;
+            // if (event.button === THREE.MOUSE.RIGHT) {
+            //     this.stopSupportMode();
+            // }
+            // return;
+        }
 
         switch (event.button) {
             case THREE.MOUSE.LEFT: {
                 // Transform on selected object
-                if (this.selectedObject) {
+                if (this.selectedGroup && this.selectedGroup.children.length > 0) {
                     const coord = this.getMouseCoord(event);
                     // Call hover to update axis selected
                     this.transformControl.onMouseHover(coord);
                     if (this.transformControl.onMouseDown(coord)) {
                         this.state = STATE.TRANSFORM;
-                        break;
-                    }
-                }
-
-                // Check if we select a new object
-                if (this.selectableObjects) {
-                    const coord = this.getMouseCoord(event);
-                    this.ray.setFromCamera(coord, this.camera);
-
-                    const intersect = this.ray.intersectObjects(this.selectableObjects, false)[0];
-                    if (intersect && intersect.object !== this.selectedObject) {
-                        this.selectedObject = intersect.object;
-                        this.transformControl.attach(this.selectedObject);
-                        this.emit(EVENTS.SELECT_OBJECT, this.selectedObject);
-                        this.emit(EVENTS.UPDATE);
                         break;
                     }
                 }
@@ -238,6 +254,8 @@ class Controls extends EventEmitter {
             case THREE.MOUSE.RIGHT:
                 this.state = STATE.PAN;
                 this.panMoved = false;
+                // should not trigger click here
+                // this.onClick(event, true);
                 this.handleMouseDownPan(event);
                 break;
             default:
@@ -252,8 +270,16 @@ class Controls extends EventEmitter {
 
     onMouseHover = (event) => {
         event.preventDefault();
-
-        if (!this.selectedObject || this.state !== STATE.NONE) {
+        // model move with mouse no matter mousedown
+        if (this.state === STATE.SUPPORT) {
+            const coord = this.getMouseCoord(event);
+            this.ray.setFromCamera(coord, this.camera);
+            const mousePosition = new THREE.Vector3();
+            this.ray.ray.intersectPlane(this.horizontalPlane, mousePosition);
+            this.supportActions.moveSupport(mousePosition);
+            this.emit(EVENTS.TRANSFORM_OBJECT);
+        }
+        if (!(this.selectedGroup && this.selectedGroup.children.length > 0) || this.state !== STATE.NONE) {
             return;
         }
 
@@ -275,7 +301,9 @@ class Controls extends EventEmitter {
                 this.handleMouseMovePan(event);
                 break;
             case STATE.TRANSFORM:
-                this.transformControl.onMouseMove(this.getMouseCoord(event));
+                if (this.canOperateModel) {
+                    this.transformControl.onMouseMove(this.getMouseCoord(event));
+                }
                 this.emit(EVENTS.TRANSFORM_OBJECT);
                 break;
             default:
@@ -285,34 +313,131 @@ class Controls extends EventEmitter {
 
     onDocumentMouseUp = (event) => {
         switch (this.state) {
-            case STATE.ROTATE:
-                // Left click to unselect object
-                if (!this.rotateMoved) {
-                    this.selectedObject = null;
-                    this.transformControl.detach();
-
-                    this.emit(EVENTS.UNSELECT_OBJECT);
-                    this.emit(EVENTS.UPDATE);
-                }
-                break;
             case STATE.PAN:
-                if (!this.panMoved) { // Right click to open context menu
-                    // Note that the event is mouse up, not really contextmenu
-                    this.emit(EVENTS.CONTEXT_MENU, event);
+                if (!this.panMoved) {
+                    if (this.prevState === STATE.SUPPORT) {
+                        // stop support mode on right click
+                        this.prevState = null;
+                        this.supportActions.stopSupportMode();
+                    } else {
+                        // check if any model selected
+                        this.onClick(event, true);
+                        // Right click to open context menu
+                        // Note that the event is mouse up, not really contextmenu
+                        this.emit(EVENTS.CONTEXT_MENU, event);
+                    }
+                } else {
+                    this.onPan();
                 }
                 break;
             case STATE.TRANSFORM:
+                if (this.sourceType === '3D') {
+                    this.emit(EVENTS.AFTER_TRANSFORM_OBJECT);
+                }
                 this.transformControl.onMouseUp();
-                this.emit(EVENTS.AFTER_TRANSFORM_OBJECT);
                 break;
             default:
                 break;
         }
 
-        this.state = STATE.NONE;
+        this.state = this.prevState || STATE.NONE;
 
         document.removeEventListener('mousemove', this.onDocumentMouseMove, false);
-        document.removeEventListener('mouseup', this.onDocumentMouseUp, false);
+        // mouse up needed no matter mousedowm on support mode
+        // document.removeEventListener('mouseup', this.onDocumentMouseUp, false);
+    };
+
+    /**
+     * Trigger by mouse event "mousedown" + "mouseup", Check if a new object is selected.
+     *
+     * @param event
+     */
+    onClick = (event, isRightClick = false) => {
+        // todo, to fix workspace not rotate
+        if (!this.selectedGroup) {
+            return;
+        }
+        if (this.state === STATE.SUPPORT) {
+            this.supportActions.saveSupport();
+            return;
+        }
+        const mousePosition = this.getMouseCoord(event);
+        const distance = Math.sqrt((this.mouseDownPosition.x - mousePosition.x) ** 2 + (this.mouseDownPosition.y - mousePosition.y) ** 2);
+
+        if (distance < 0.004 && this.selectableObjects.children) {
+            // TODO: selectable objects should not change when objects are selected
+            let allObjects = this.selectableObjects.children;
+
+            if (this.selectedGroup && this.selectedGroup.children) {
+                allObjects = allObjects.concat(this.selectedGroup.children);
+            }
+
+            // Check if we select a new object
+            const coord = this.getMouseCoord(event);
+            this.ray.setFromCamera(coord, this.camera);
+
+
+            const intersect = this.ray.intersectObjects(allObjects, true)[0];
+            const isMultiSelect = event.shiftKey;
+
+            let selectEvent = '';
+            if (isMultiSelect) {
+                if (isRightClick) {
+                    if (intersect) {
+                        const objectIndex = this.selectedGroup.children.indexOf(intersect.object);
+                        if (objectIndex === -1) {
+                            selectEvent = SELECTEVENT.UNSELECT_SINGLESELECT;
+                        }
+                    } else {
+                        selectEvent = SELECTEVENT.UNSELECT;
+                    }
+                } else {
+                    if (intersect) {
+                        const objectIndex = this.selectedGroup.children.indexOf(intersect.object);
+                        if (objectIndex === -1) {
+                            selectEvent = SELECTEVENT.ADDSELECT;
+                        } else {
+                            selectEvent = SELECTEVENT.REMOVESELECT;
+                        }
+                    }
+                }
+            } else {
+                if (isRightClick) {
+                    if (intersect) {
+                        const objectIndex = this.selectedGroup.children.indexOf(intersect.object);
+                        if (objectIndex === -1) {
+                            selectEvent = SELECTEVENT.UNSELECT_SINGLESELECT;
+                        }
+                    } else {
+                        selectEvent = SELECTEVENT.UNSELECT;
+                    }
+                } else if (!isRightClick) {
+                    if (intersect) {
+                        selectEvent = SELECTEVENT.UNSELECT_SINGLESELECT;
+                    } else {
+                        selectEvent = SELECTEVENT.UNSELECT;
+                    }
+                }
+            }
+            // When in four-axis mode, 'shouldForbidSelect' is true, each click will trigger 'UNSELECT' event
+            if (this.shouldForbidSelect) {
+                selectEvent = SELECTEVENT.UNSELECT;
+            }
+            this.emit(EVENTS.SELECT_OBJECTS, intersect, selectEvent);
+
+            if (this.sourceType === '3D') {
+                this.transformControl.attach(this.selectedGroup);
+            } else {
+                // FIXME: temporary solution
+                if (intersect) {
+                    this.transformControl.attach(intersect.object);
+                } else {
+                    this.transformControl.detach();
+                }
+            }
+            this.emit(EVENTS.UPDATE);
+            this.mouseDownPosition = null;
+        }
     };
 
     onMouseWheel = (event) => {
@@ -368,22 +493,48 @@ class Controls extends EventEmitter {
         this.selectableObjects = objects;
     }
 
-    attach(object) {
-        this.selectedObject = object;
-        this.transformControl.attach(object);
+    setShouldForbidSelect(shouldForbidSelect) {
+        this.shouldForbidSelect = shouldForbidSelect;
+        this.transformControl.updateFramePeripheralVisible(!shouldForbidSelect);
+    }
+
+    updateBoundingBox() {
+        this.transformControl.updateBoundingBox();
+    }
+
+    attach(objects) {
+        this.selectedGroup = objects;
+        this.transformControl.attach(objects);
     }
 
     detach() {
-        this.selectedObject = null;
         this.transformControl.detach();
+    }
+
+    startSupportMode() {
+        this.state = STATE.SUPPORT;
+    }
+
+    stopSupportMode() {
+        this.state = STATE.NONE;
     }
 
     updateCamera() {
         this.offset.copy(this.camera.position).sub(this.target);
 
+        const spherialOffset = new THREE.Vector3();
+
         // rotate & scale
         if (this.sphericalDelta.theta !== 0 || this.sphericalDelta.phi !== 0 || this.scale !== 1) {
-            this.spherical.setFromVector3(this.offset);
+            // Spherical is based on XZ plane, instead of implement a new spherical on XY plane
+            // we use a Vector3 to swap Y and Z as a little calculation trick.
+            if (this.camera.up.z === 1) {
+                spherialOffset.set(this.offset.x, this.offset.z, -this.offset.y);
+            } else {
+                spherialOffset.copy(this.offset);
+            }
+            this.spherical.setFromVector3(spherialOffset);
+
             this.spherical.theta += this.sphericalDelta.theta;
             this.spherical.phi += this.sphericalDelta.phi;
             this.spherical.makeSafe();
@@ -391,20 +542,33 @@ class Controls extends EventEmitter {
             this.spherical.radius *= this.scale;
             this.spherical.radius = Math.max(this.spherical.radius, 0.05);
 
-            this.offset.setFromSpherical(this.spherical);
+            spherialOffset.setFromSpherical(this.spherical);
+
+            if (this.camera.up.z === 1) {
+                this.offset.set(spherialOffset.x, -spherialOffset.z, spherialOffset.y);
+            } else {
+                this.offset.copy(spherialOffset);
+            }
 
             this.sphericalDelta.set(0, 0, 0);
-            this.scale = 1;
         }
 
         // pan
-        this.target.add(this.panOffset);
-        this.panOffset.set(0, 0, 0);
+        if (this.panOffset.x || this.panOffset.y) {
+            this.target.add(this.panOffset);
+            this.panOffset.set(0, 0, 0);
+        }
 
         // re-position camera
         this.camera.position.copy(this.target).add(this.offset);
         this.camera.lookAt(this.target);
 
+        // need to update scale after camera position setted,
+        // because of camera position used to calculate current scale
+        if (this.scale !== 1) {
+            this.onScale();
+            this.scale = 1;
+        }
         // using small-angle approximation cos(x/2) = 1 - x^2 / 8
         if (this.lastPosition.distanceToSquared(this.camera.position) > EPS
             || 8 * (1 - this.lastQuaternion.dot(this.camera.quaternion)) > EPS) {

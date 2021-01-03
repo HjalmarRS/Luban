@@ -60,11 +60,10 @@ function createDefaultWidget(WrappedWidget) {
     const mapStateToProps = (state, ownProps) => {
         const { widgets } = state.widget;
         const { widgetId } = ownProps;
-        const { minimized = false, fullscreen = false, needRemove = false } = widgets[widgetId] || {};
+        const { minimized = false, fullscreen = false } = widgets[widgetId] || {};
         return {
             minimized,
-            fullscreen,
-            needRemove
+            fullscreen
         };
     };
 
@@ -76,12 +75,12 @@ function createDefaultWidget(WrappedWidget) {
     return connect(mapStateToProps, mapDispatchToProps)(class extends PureComponent {
         static propTypes = {
             widgetId: PropTypes.string.isRequired,
+            headType: PropTypes.string,
             onRemove: PropTypes.func,
             onToggle: PropTypes.func,
 
             minimized: PropTypes.bool.isRequired,
             fullscreen: PropTypes.bool.isRequired,
-            needRemove: PropTypes.bool,
 
             updateWidgetState: PropTypes.func.isRequired
         };
@@ -124,12 +123,11 @@ function createDefaultWidget(WrappedWidget) {
         };
 
         render() {
-            const { widgetId, minimized, fullscreen, needRemove, onToggle } = this.props;
+            const { widgetId, headType, minimized, fullscreen, onToggle } = this.props;
             const state = {
                 title: this.state.title,
                 minimized: minimized,
                 fullscreen: fullscreen,
-                needRemove: needRemove,
                 buttons: this.state.buttons
             };
             const actions = this.actions;
@@ -181,6 +179,7 @@ function createDefaultWidget(WrappedWidget) {
                     <Widget.Content style={{ display: state.minimized ? 'none' : 'block' }}>
                         <WrappedWidget
                             widgetId={widgetId}
+                            headType={headType}
                             minimized={minimized}
                             onToggle={onToggle}
                             setTitle={actions.setTitle}

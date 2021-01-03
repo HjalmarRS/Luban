@@ -1,6 +1,5 @@
 import classNames from 'classnames';
-import Select from 'react-select';
-// import _ from 'lodash';
+
 import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
 import { connect } from 'react-redux';
@@ -8,9 +7,10 @@ import { MACHINE_SERIES } from '../../constants';
 import api from '../../api';
 import modal from '../../lib/modal';
 import { timestamp } from '../../../shared/lib/random-utils';
-import { CaseConfig150, CaseConfig250, CaseConfig350 } from './CaseConfig';
+import { CaseConfigOriginal, CaseConfig150, CaseConfig250, CaseConfig350, CaseConfigFourAxis } from './CaseConfig';
 import { actions as printingActions } from '../../flux/printing';
-import { actions as sharedActions } from '../../flux/cncLaserShared';
+import { actions as workspaceActions } from '../../flux/workspace';
+import { actions as editorActions } from '../../flux/editor';
 import i18n from '../../lib/i18n';
 import styles from './index.styl';
 
@@ -20,9 +20,10 @@ class CaseLibrary extends PureComponent {
         headType: PropTypes.string,
         isConnected: PropTypes.bool,
         // laser: PropTypes.object.isRequired,
+        updateMaterials: PropTypes.func.isRequired,
         insertDefaultCncTextVector: PropTypes.func.isRequired,
         insertDefaultLaserTextVector: PropTypes.func.isRequired,
-        updateDefaultAdvised: PropTypes.func.isRequired,
+        updateIsRecommended: PropTypes.func.isRequired,
         updateDefaultMaterialId: PropTypes.func.isRequired,
         updateDefaultQualityId: PropTypes.func.isRequired,
         qualityDefinitions: PropTypes.array.isRequired,
@@ -33,13 +34,14 @@ class CaseLibrary extends PureComponent {
         duplicateQualityDefinition: PropTypes.func.isRequired,
         removeAllModels: PropTypes.func.isRequired,
         uploadCaseModel: PropTypes.func.isRequired,
+        renderGcodeFile: PropTypes.func.isRequired,
         uploadCncCaseImage: PropTypes.func.isRequired,
-        uploadLaserCaseImage: PropTypes.func.isRequired
+        uploadLaserCaseImage: PropTypes.func.isRequired,
+        use4Axis: PropTypes.bool.isRequired
     };
 
 
     state = {
-        currentSize: ['A150', 'A250', 'A350'].indexOf(this.props.series) > -1 ? this.props.series : 'A150'
     };
 
     actions = {
@@ -70,9 +72,9 @@ class CaseLibrary extends PureComponent {
             const qualityDefinition = await this.props.qualityDefinitions.find(d => d.definitionId === qualityDefinitionId);
             if (qualityDefinition) {
                 if (['quality.fast_print', 'quality.normal_quality', 'quality.high_quality'].indexOf(qualityDefinitionId) === -1) {
-                    this.props.updateDefaultAdvised(false);
+                    this.props.updateIsRecommended(false);
                 } else {
-                    this.props.updateDefaultAdvised(true);
+                    this.props.updateIsRecommended(true);
                 }
                 this.props.updateDefaultQualityId(qualityDefinitionId);
                 this.props.updateActiveDefinition(qualityDefinition);
@@ -89,60 +91,44 @@ class CaseLibrary extends PureComponent {
                         newDefinition.settings[key].from = addDefinition.definitionId;
                     }
                 }
-                this.props.updateDefaultAdvised(false);
+                this.props.updateIsRecommended(false);
 
-                this.props.updateDefaultQualityId(newDefinition.definitionId);
                 this.props.updateDefinitionSettings(newDefinition, newDefinition.settings);
+                this.props.updateDefaultQualityId(newDefinition.definitionId);
                 this.props.updateActiveDefinition(newDefinition);
             }
         },
         loadLaserCncCaseSettings: async (config) => {
-            if (config.mode === 'trace') {
-                const res = await api.uploadLaserCaseImage(config.pathConfig, config.mode, () => {
-                    modal({
-                        title: i18n._('Parse Image Error'),
-                        body: i18n._('Failed to parse image file {{filename}}', { filename: config.pathConfig.name })
-                    });
-                });
-                const result = await api.processTrace({
-                    originalName: res.body.originalName,
-                    uploadName: res.body.uploadName,
-                    width: res.body.width,
-                    height: res.body.height
-                });
-                console.log('trace', res, result);
-            } else if (config.mode === 'text') {
+            if (config.mode === 'text') {
                 if (config.tag === 'laser') {
                     await this.props.insertDefaultLaserTextVector(config.caseConfigs, config.caseTransformation);
                 } else {
                     await this.props.insertDefaultCncTextVector(config.caseConfigs, config.caseTransformation);
                 }
             } else {
+                if (config.materials) {
+                    this.props.updateMaterials(config.tag, config.materials);
+                }
                 if (config.tag === 'laser') {
                     await this.props.uploadLaserCaseImage(config.pathConfig, config.mode, config.caseConfigs, config.caseTransformation, () => {
                         modal({
-                            title: i18n._('Parse Image Error'),
-                            body: i18n._('Failed to parse image file {{filename}}', { filename: config.pathConfig.name })
+                            title: i18n._('Parse Error'),
+                            body: i18n._('Failed to parse image file {{filename}}.', { filename: config.pathConfig.name })
                         });
                     });
                 } else {
                     await this.props.uploadCncCaseImage(config.pathConfig, config.mode, config.caseConfigs, config.caseTransformation, () => {
                         modal({
-                            title: i18n._('Parse Image Error'),
-                            body: i18n._('Failed to parse image file {{filename}}', { filename: config.pathConfig.name })
+                            title: i18n._('Parse Error'),
+                            body: i18n._('Failed to parse image file {{filename}}.', { filename: config.pathConfig.name })
                         });
                     });
                 }
             }
-        },
-        onChangeSizeType: (option) => {
-            this.setState({
-                currentSize: option.value
-            });
         }
     };
 
-    loadCase = (config) => {
+    loadThreeAxisCase = (config) => {
         document.location.href = `/#/${config.tag}`;
         if (config.tag === '3dp') {
             this.actions.load3dpCaseSettings(config);
@@ -153,13 +139,43 @@ class CaseLibrary extends PureComponent {
         }
     };
 
+    loadFourAxisCase = (config) => {
+        document.location.href = `/#/${config.tag}`;
+        if (config.tag !== 'workspace') {
+            this.actions.loadLaserCncCaseSettings(config);
+        } else {
+            const formData = new FormData();
+            const name = config.pathConfig.name;
+            const casePath = config.pathConfig.casePath;
+            formData.append('casePath', casePath);
+            formData.append('name', name);
+            api.uploadGcodeFile(formData)
+                .then((res) => {
+                    const response = res.body;
+                    const header = response.gcodeHeader;
+                    const gcodeFile = {
+                        name: response.uploadName,
+                        uploadName: response.uploadName,
+                        size: response.size,
+                        lastModified: +new Date(),
+                        thumbnail: header[';thumbnail'] || ''
+                    };
+                    this.props.renderGcodeFile(gcodeFile);
+                });
+        }
+    };
+
     render() {
         let CaseConfig;
-        if (this.state.currentSize === MACHINE_SERIES.A150.value) {
+        if (this.props.series === MACHINE_SERIES.ORIGINAL.value) {
+            CaseConfig = CaseConfigOriginal;
+        } else if (this.props.series === MACHINE_SERIES.CUSTOM.value) {
+            CaseConfig = CaseConfigOriginal;
+        } else if (this.props.series === MACHINE_SERIES.A150.value) {
             CaseConfig = CaseConfig150;
-        } else if (this.state.currentSize === MACHINE_SERIES.A250.value) {
+        } else if (this.props.series === MACHINE_SERIES.A250.value) {
             CaseConfig = CaseConfig250;
-        } else if (this.state.currentSize === MACHINE_SERIES.A350.value) {
+        } else if (this.props.series === MACHINE_SERIES.A350.value) {
             CaseConfig = CaseConfig350;
         } else {
             CaseConfig = CaseConfig150;
@@ -171,23 +187,9 @@ class CaseLibrary extends PureComponent {
                     <h2 className={styles.mainTitle}>
                         {i18n._('Featured Projects')}
                     </h2>
-                    <Select
-                        clearable={false}
-                        className={styles.sizeSelect}
-                        options={[{
-                            value: 'A150',
-                            label: i18n._('A150')
-                        }, {
-                            value: 'A250',
-                            label: i18n._('A250')
-                        }, {
-                            value: 'A350',
-                            label: i18n._('A350')
-                        }]}
-                        value={this.state.currentSize}
-                        searchable={false}
-                        onChange={this.actions.onChangeSizeType}
-                    />
+                    <h2 className={styles.subTitle}>
+                        {i18n._('3-axis')}
+                    </h2>
                     <div className={styles.columns}>
                         { CaseConfig.map((config) => {
                             return (
@@ -211,7 +213,7 @@ class CaseLibrary extends PureComponent {
                                             styles.load,
                                         )}
                                         disabled={this.props.isConnected && this.props.headType !== config.tag}
-                                        onClick={() => this.loadCase(config)}
+                                        onClick={() => this.loadThreeAxisCase(config)}
                                     >
                                         {i18n._('load')}
                                     </button>
@@ -219,8 +221,45 @@ class CaseLibrary extends PureComponent {
                             );
                         })}
                     </div>
-                </div>
+                    {this.props.use4Axis && (
+                        <div>
+                            <h2 className={styles.subTitle}>
+                                {i18n._('4-axis')}
+                            </h2>
+                            <div className={styles.columns}>
+                                { CaseConfigFourAxis.map((config) => {
+                                    return (
+                                        <div
+                                            className={styles.column}
+                                            key={config.pathConfig.name + timestamp()}
+                                        >
+                                            <div>
+                                                <img className={styles.imgIcon} src={config.imgSrc} alt={config.title} />
+                                            </div>
+                                            <div className={styles.cardtext}>
+                                                <h4>{config.title}</h4>
+                                                <p>{i18n._('by Snapmaker')}</p>
+                                            </div>
 
+                                            <button
+                                                type="button"
+                                                className={classNames(
+                                                    'sm-btn-large',
+                                                    'sm-btn-default',
+                                                    styles.load,
+                                                )}
+                                                disabled={this.props.isConnected && (this.props.series === MACHINE_SERIES.A150.value || this.props.series === MACHINE_SERIES.ORIGINAL.value) && this.props.headType !== config.tag}
+                                                onClick={() => this.loadFourAxisCase(config)}
+                                            >
+                                                {i18n._(config.loadText || 'load')}
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         );
     }
@@ -235,6 +274,7 @@ const mapStateToProps = (state) => {
         series: machine.series,
         headType: machine.headType,
         isConnected: machine.isConnected,
+        use4Axis: machine.use4Axis,
         defaultMaterialId,
         qualityDefinitions,
         activeDefinition
@@ -243,22 +283,22 @@ const mapStateToProps = (state) => {
 
 
 const mapDispatchToProps = (dispatch) => ({
-    insertDefaultLaserTextVector: (caseConfigs, caseTransformation) => dispatch(sharedActions.insertDefaultTextVector('laser', caseConfigs, caseTransformation)),
-    insertDefaultCncTextVector: (caseConfigs, caseTransformation) => dispatch(sharedActions.insertDefaultTextVector('cnc', caseConfigs, caseTransformation)),
+    insertDefaultLaserTextVector: (caseConfigs, caseTransformation) => dispatch(editorActions.insertDefaultTextVector('laser', caseConfigs, caseTransformation)),
+    insertDefaultCncTextVector: (caseConfigs, caseTransformation) => dispatch(editorActions.insertDefaultTextVector('cnc', caseConfigs, caseTransformation)),
     // uploadFont: (file) => dispatch(textActions.uploadFont(file)),
-    updateLaserState: (params) => dispatch(sharedActions.updateState('laser', params)),
-    uploadLaserCaseImage: (file, mode, caseConfigs, caseTransformation, onFailure) => dispatch(sharedActions.uploadCaseImage('laser', file, mode, caseConfigs, caseTransformation, onFailure)),
-    uploadCncCaseImage: (file, mode, caseConfigs, caseTransformation, onFailure) => dispatch(sharedActions.uploadCaseImage('cnc', file, mode, caseConfigs, caseTransformation, onFailure)),
-
-
-    updateDefaultAdvised: (isAdvised) => dispatch(printingActions.updateState({ 'isAdvised': isAdvised })),
-    updateDefaultMaterialId: (defaultMaterialId) => dispatch(printingActions.updateState({ defaultMaterialId })),
-    updateDefaultQualityId: (defaultQualityId) => dispatch(printingActions.updateState({ defaultQualityId })),
+    updateLaserState: (params) => dispatch(editorActions.updateState('laser', params)),
+    uploadLaserCaseImage: (file, mode, caseConfigs, caseTransformation, onFailure) => dispatch(editorActions.uploadCaseImage('laser', file, mode, caseConfigs, caseTransformation, onFailure)),
+    uploadCncCaseImage: (file, mode, caseConfigs, caseTransformation, onFailure) => dispatch(editorActions.uploadCaseImage('cnc', file, mode, caseConfigs, caseTransformation, onFailure)),
+    updateIsRecommended: (isRecommended) => dispatch(printingActions.updateIsRecommended(isRecommended)),
+    updateDefaultMaterialId: (materialId) => dispatch(printingActions.updateDefaultMaterialId(materialId)),
+    updateDefaultQualityId: (qualityId) => dispatch(printingActions.updateDefaultQualityId(qualityId)),
     updateActiveDefinition: (definition, shouldSave = false) => dispatch(printingActions.updateActiveDefinition(definition, shouldSave)),
     updateDefinitionSettings: (definition, settings) => dispatch(printingActions.updateDefinitionSettings(definition, settings)),
     duplicateMaterialDefinition: (definition, newDefinitionId, newDefinitionName) => dispatch(printingActions.duplicateMaterialDefinition(definition, newDefinitionId, newDefinitionName)),
     duplicateQualityDefinition: (definition, newDefinitionId, newDefinitionName) => dispatch(printingActions.duplicateQualityDefinition(definition, newDefinitionId, newDefinitionName)),
+    renderGcodeFile: (gcodeFile) => dispatch(workspaceActions.renderGcodeFile(gcodeFile)),
     removeAllModels: () => dispatch(printingActions.removeAllModels()),
+    updateMaterials: (headType, materials) => dispatch(editorActions.updateMaterials(headType, materials)),
     uploadCaseModel: (file) => dispatch(printingActions.uploadCaseModel(file))
 });
 

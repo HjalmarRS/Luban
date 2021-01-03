@@ -3,6 +3,8 @@ import React, { PureComponent } from 'react';
 import { connect } from 'react-redux';
 import isEqual from 'lodash/isEqual';
 import { Vector3, Box3 } from 'three';
+
+
 import { EPSILON } from '../../constants';
 import i18n from '../../lib/i18n';
 import ProgressBar from '../../components/ProgressBar';
@@ -22,8 +24,7 @@ class Visualizer extends PureComponent {
     static propTypes = {
         size: PropTypes.object.isRequired,
         stage: PropTypes.number.isRequired,
-        // model: PropTypes.object,
-        selectedModelID: PropTypes.string,
+        selectedModelArray: PropTypes.array,
         modelGroup: PropTypes.object.isRequired,
         hasModel: PropTypes.bool.isRequired,
         gcodeLineGroup: PropTypes.object.isRequired,
@@ -32,19 +33,24 @@ class Visualizer extends PureComponent {
         displayedType: PropTypes.string.isRequired,
         renderingTimestamp: PropTypes.number.isRequired,
 
-        selectModel: PropTypes.func.isRequired,
-        getSelectedModel: PropTypes.func.isRequired,
-        unselectAllModels: PropTypes.func.isRequired,
+        selectMultiModel: PropTypes.func.isRequired,
         removeSelectedModel: PropTypes.func.isRequired,
         removeAllModels: PropTypes.func.isRequired,
         arrangeAllModels: PropTypes.func.isRequired,
         onModelTransform: PropTypes.func.isRequired,
         onModelAfterTransform: PropTypes.func.isRequired,
         updateSelectedModelTransformation: PropTypes.func.isRequired,
-        multiplySelectedModel: PropTypes.func.isRequired,
+        duplicateSelectedModel: PropTypes.func.isRequired,
+        setTransformMode: PropTypes.func.isRequired,
+        saveSupport: PropTypes.func.isRequired,
+        clearAllManualSupport: PropTypes.func.isRequired,
         layFlatSelectedModel: PropTypes.func.isRequired
     };
 
+    state = {
+        isSupporting: false,
+        defaultSupportSize: { x: 5, y: 5 }
+    };
 
     printableArea = null;
 
@@ -62,8 +68,8 @@ class Visualizer extends PureComponent {
         zoomOut: () => {
             this.canvas.current.zoomOut();
         },
-        autoFocus: () => {
-            this.canvas.current.autoFocus();
+        toFront: () => {
+            this.canvas.current.toFront();
         },
         toLeft: () => {
             this.canvas.current.toLeft();
@@ -77,11 +83,8 @@ class Visualizer extends PureComponent {
         toBottom: () => {
             this.canvas.current.toBottom();
         },
-        onSelectModel: (modelMesh) => {
-            this.props.selectModel(modelMesh);
-        },
-        onUnselectAllModels: () => {
-            this.props.unselectAllModels();
+        onSelectModels: (intersect, selectEvent) => {
+            this.props.selectMultiModel(intersect, selectEvent);
         },
         onModelAfterTransform: () => {
             this.props.onModelAfterTransform();
@@ -91,14 +94,15 @@ class Visualizer extends PureComponent {
         },
         // context menu
         centerSelectedModel: () => {
-            this.props.updateSelectedModelTransformation({ positionX: 0, positionZ: 0 });
+            this.props.updateSelectedModelTransformation({ positionX: 0, positionY: 0 });
+            this.actions.updateBoundingBox();
             this.props.onModelAfterTransform();
         },
         deleteSelectedModel: () => {
             this.props.removeSelectedModel();
         },
         duplicateSelectedModel: () => {
-            this.props.multiplySelectedModel(1);
+            this.props.duplicateSelectedModel();
         },
         resetSelectedModelTransformation: () => {
             this.props.updateSelectedModelTransformation({
@@ -119,6 +123,68 @@ class Visualizer extends PureComponent {
         },
         layFlatSelectedModel: () => {
             this.props.layFlatSelectedModel();
+        },
+        updateBoundingBox: () => {
+            this.canvas.current.controls.updateBoundingBox();
+        },
+        setTransformMode: (value) => {
+            this.props.setTransformMode(value);
+            this.canvas.current.setTransformMode(value);
+        }
+        // startSupportMode: () => {
+        //     this.canvas.current.controls.startSupportMode();
+        // },
+        // clearSelectedSupport: () => {
+        //     const { modelGroup } = this.props;
+        //     const isSupportSelected = modelGroup.selectedModelArray.length === 1 && modelGroup.selectedModelArray[0].supportTag === true;
+        //     if (isSupportSelected) {
+        //         modelGroup.removeSelectedModel();
+        //     }
+        // },
+        // clearAllManualSupport: () => {
+        //     this.props.modelGroup.removeAllManualSupport();
+        // }
+    };
+
+    // all support related actions used in VisualizerModelTransformation & canvas.controls & contextmenu
+    supportActions = {
+        isSupporting: () => {
+            return this.state.isSupporting;
+        },
+        startSupportMode: () => {
+            this.actions.setTransformMode('support');
+            this.setState({ isSupporting: true });
+            this.canvas.current.controls.startSupportMode();
+            const model = this.props.selectedModelArray[0];
+            model.setVertexColors();
+        },
+        stopSupportMode: () => {
+            this.setState({ isSupporting: false });
+            this.supportActions.saveSupport();
+            this.canvas.current.controls.stopSupportMode();
+            const model = this.props.selectedModelArray[0];
+            model && model.removeVertexColors();
+        },
+        moveSupport: (position) => {
+            const { modelGroup } = this.props;
+            if (!this._model) {
+                this._model = modelGroup.addSupportOnSelectedModel(this.state.defaultSupportSize);
+            }
+            this._model.setSupportPosition(position);
+        },
+        saveSupport: () => {
+            if (this._model) {
+                this.props.saveSupport(this._model);
+                this._model = null;
+            }
+        },
+        setDefaultSupportSize: (size) => {
+            let defaultSupportSize = this.state.defaultSupportSize;
+            defaultSupportSize = { ...defaultSupportSize, ...size };
+            this.setState({ defaultSupportSize });
+        },
+        clearAllManualSupport: () => {
+            this.props.clearAllManualSupport();
         }
     };
 
@@ -147,37 +213,41 @@ class Visualizer extends PureComponent {
     }
 
     componentWillReceiveProps(nextProps) {
-        const { size, transformMode, selectedModelID, renderingTimestamp } = nextProps;
-
+        const { size, transformMode, selectedModelArray, renderingTimestamp, modelGroup } = nextProps;
         if (transformMode !== this.props.transformMode) {
             this.canvas.current.setTransformMode(transformMode);
+            if (transformMode !== 'support') {
+                this.supportActions.stopSupportMode();
+            }
         }
+        if (selectedModelArray !== this.props.selectedModelArray) {
+            // selectedModelIDArray.forEach((modelID) => {
+            //     const model = modelGroup.models.find(d => d.modelID === modelID);
+            //     modelGroup.selectedGroup.add(model.meshObject);
+            // });
+            this.canvas.current.controls.updateBoundingBox();
+            this.canvas.current.controls.attach(modelGroup.selectedGroup);
 
-        if (selectedModelID !== this.props.selectedModelID) {
-            const selectedModel = this.props.getSelectedModel();
-            // if (!selectedModelID || !selectedModel) {
-            if (!selectedModel) {
-                this.canvas.current.controls.detach();
-            } else {
-                const meshObject = selectedModel.meshObject;
-                if (meshObject) {
-                    this.canvas.current.controls.attach(meshObject);
-                }
+            this.supportActions.stopSupportMode();
+            if (selectedModelArray.length === 1 && selectedModelArray[0].supportTag && !['translate', 'scale'].includes(transformMode)) {
+                this.actions.setTransformMode('translate');
             }
         }
 
         if (!isEqual(size, this.props.size)) {
             this.printableArea.updateSize(size);
-            const { modelGroup, gcodeLineGroup } = this.props;
+            const { gcodeLineGroup } = this.props;
 
             modelGroup.updateBoundingBox(new Box3(
-                new Vector3(-size.x / 2 - EPSILON, -EPSILON, -size.y / 2 - EPSILON),
-                new Vector3(size.x / 2 + EPSILON, size.z + EPSILON, size.y / 2 + EPSILON)
+                new Vector3(-size.x / 2 - EPSILON, -size.y / 2 - EPSILON, -EPSILON),
+                new Vector3(size.x / 2 + EPSILON, size.y / 2 + EPSILON, size.z + EPSILON)
             ));
 
-            gcodeLineGroup.position.set(-size.x / 2, 0, size.y / 2);
+            // Re-position model group
+            gcodeLineGroup.position.set(-size.x / 2, -size.y / 2, 0);
+            this.canvas.current.setCamera(new Vector3(0, -Math.max(size.x, size.y, size.z) * 2, size.z / 2), new Vector3(0, 0, size.z / 2));
+            this.supportActions.stopSupportMode();
         }
-
         if (renderingTimestamp !== this.props.renderingTimestamp) {
             this.canvas.current.renderScene();
         }
@@ -218,15 +288,18 @@ class Visualizer extends PureComponent {
     };
 
     render() {
-        const { size, hasModel, selectedModelID, modelGroup, gcodeLineGroup, progress, displayedType } = this.props;
+        const { size, hasModel, selectedModelArray, modelGroup, gcodeLineGroup, progress, displayedType } = this.props;
 
         // const actions = this.actions;
 
-        const isModelSelected = !!selectedModelID;
+        const isModelSelected = (selectedModelArray.length > 0);
+        const isSupportSelected = modelGroup.selectedModelArray.length === 1 && modelGroup.selectedModelArray[0].supportTag === true;
         const isModelDisplayed = (displayedType === 'model');
-
         const notice = this.getNotice();
-
+        // let isSupporting = false;
+        // if (this.canvas.current && this.canvas.current.controls.state === 4) {
+        //     isSupporting = true;
+        // }
         return (
             <div
                 className={styles.visualizer}
@@ -237,7 +310,14 @@ class Visualizer extends PureComponent {
                 </div>
 
                 <div className={styles['visualizer-model-transformation']}>
-                    <VisualizerModelTransformation />
+                    <VisualizerModelTransformation
+                        updateBoundingBox={this.actions.updateBoundingBox}
+                        setTransformMode={this.actions.setTransformMode}
+                        supportActions={this.supportActions}
+                        defaultSupportSize={this.state.defaultSupportSize}
+                        isSupporting={this.state.isSupporting}
+
+                    />
                 </div>
 
                 <div className={styles['visualizer-camera-operations']}>
@@ -252,23 +332,22 @@ class Visualizer extends PureComponent {
                     <VisualizerInfo />
                 </div>
 
-                <div className={styles['visualizer-notice']}>
-                    <p>{notice}</p>
-                </div>
                 <div className={styles['visualizer-progress']}>
-                    <ProgressBar progress={progress * 100} />
+                    <ProgressBar tips={notice} progress={progress * 100} />
                 </div>
 
                 <div className={styles['canvas-content']} style={{ top: 0 }}>
                     <Canvas
                         ref={this.canvas}
                         size={size}
-                        modelGroup={modelGroup.object}
+                        modelGroup={modelGroup}
                         printableArea={this.printableArea}
-                        cameraInitialPosition={new Vector3(0, size.z / 2, Math.max(size.x, size.y, size.z) * 2)}
+                        cameraInitialPosition={new Vector3(0, -Math.max(size.x, size.y, size.z) * 2, size.z / 2)}
+                        cameraInitialTarget={new Vector3(0, 0, size.z / 2)}
+                        cameraUp={new Vector3(0, 0, 1)}
                         gcodeLineGroup={gcodeLineGroup}
-                        onSelectModel={this.actions.onSelectModel}
-                        onUnselectAllModels={this.actions.onUnselectAllModels}
+                        supportActions={this.supportActions}
+                        onSelectModels={this.actions.onSelectModels}
                         onModelAfterTransform={this.actions.onModelAfterTransform}
                         onModelTransform={this.actions.onModelTransform}
                         showContextMenu={this.showContextMenu}
@@ -278,7 +357,7 @@ class Visualizer extends PureComponent {
                     <SecondaryToolbar
                         zoomIn={this.actions.zoomIn}
                         zoomOut={this.actions.zoomOut}
-                        autoFocus={this.actions.autoFocus}
+                        toFront={this.actions.toFront}
                     />
                 </div>
                 <ContextMenu
@@ -321,7 +400,28 @@ class Visualizer extends PureComponent {
                             },
                             {
                                 type: 'item',
-                                label: i18n._('Clear Build Plate'),
+                                label: i18n._('Add Manual Support'),
+                                disabled: !isModelSelected || isSupportSelected,
+                                onClick: this.supportActions.startSupportMode
+                            },
+                            {
+                                type: 'item',
+                                label: i18n._('Delete Selected Support'),
+                                disabled: !isSupportSelected,
+                                onClick: this.supportActions.clearSelectedSupport
+                            },
+                            {
+                                type: 'item',
+                                label: i18n._('Clear All Manual Support'),
+                                disabled: false,
+                                onClick: this.supportActions.clearAllManualSupport
+                            },
+                            {
+                                type: 'separator'
+                            },
+                            {
+                                type: 'item',
+                                label: i18n._('Clear Heated Bed'),
                                 disabled: !hasModel || !isModelDisplayed,
                                 onClick: this.actions.clearBuildPlate
                             },
@@ -344,12 +444,13 @@ const mapStateToProps = (state) => {
     const printing = state.printing;
     const { size } = machine;
     // TODO: be to organized
-    const { stage, selectedModelID, modelGroup, hasModel, gcodeLineGroup, transformMode, progress, displayedType, renderingTimestamp } = printing;
+    const { stage, modelGroup, hasModel, gcodeLineGroup, transformMode, progress, displayedType, renderingTimestamp } = printing;
 
     return {
         stage,
         size,
-        selectedModelID,
+        allModel: modelGroup.models,
+        selectedModelArray: modelGroup.selectedModelArray,
         modelGroup,
         hasModel,
         gcodeLineGroup,
@@ -361,17 +462,18 @@ const mapStateToProps = (state) => {
 };
 
 const mapDispatchToProps = (dispatch) => ({
-    selectModel: (modelMesh) => dispatch(printingActions.selectModel(modelMesh)),
-    getSelectedModel: () => dispatch(printingActions.getSelectedModel()),
-    unselectAllModels: () => dispatch(printingActions.unselectAllModels()),
+    selectMultiModel: (intersect, selectEvent) => dispatch(printingActions.selectMultiModel(intersect, selectEvent)),
     removeSelectedModel: () => dispatch(printingActions.removeSelectedModel()),
     removeAllModels: () => dispatch(printingActions.removeAllModels()),
     arrangeAllModels: () => dispatch(printingActions.arrangeAllModels()),
     onModelTransform: () => dispatch(printingActions.onModelTransform()),
     onModelAfterTransform: () => dispatch(printingActions.onModelAfterTransform()),
     updateSelectedModelTransformation: (transformation) => dispatch(printingActions.updateSelectedModelTransformation(transformation)),
-    multiplySelectedModel: (count) => dispatch(printingActions.multiplySelectedModel(count)),
-    layFlatSelectedModel: () => dispatch(printingActions.layFlatSelectedModel())
+    duplicateSelectedModel: () => dispatch(printingActions.duplicateSelectedModel()),
+    layFlatSelectedModel: () => dispatch(printingActions.layFlatSelectedModel()),
+    setTransformMode: (value) => dispatch(printingActions.setTransformMode(value)),
+    clearAllManualSupport: () => dispatch(printingActions.clearAllManualSupport()),
+    saveSupport: (model) => dispatch(printingActions.saveSupport(model))
 });
 
 export default connect(mapStateToProps, mapDispatchToProps)(Visualizer);

@@ -5,6 +5,7 @@ import DataStorage from '../../DataStorage';
 import { GcodeGenerator } from '../../lib/GcodeGenerator';
 import logger from '../../lib/logger';
 import { pathWithRandomSuffix } from '../../../shared/lib/random-utils';
+import { isNull } from '../../../shared/lib/utils';
 
 const log = logger('service:TaskManager');
 
@@ -35,7 +36,7 @@ const addHeaderToFile = (header, name, tmpFilePath, filePath, thumbnail) => {
                     name: name,
                     uploadName: name,
                     size: ws.bytesWritten,
-                    lastModifiedDate: new Date().getTime(),
+                    lastModified: +new Date(),
                     thumbnail: thumbnail
                 }
             });
@@ -43,17 +44,47 @@ const addHeaderToFile = (header, name, tmpFilePath, filePath, thumbnail) => {
     });
 };
 
+const checkoutBoundingBoxIsNull = (boundingBox) => {
+    if (!boundingBox) {
+        return;
+    }
+    if (isNull(boundingBox.max.x)) {
+        boundingBox.max.x = 0;
+    }
+    if (isNull(boundingBox.min.x)) {
+        boundingBox.min.x = 0;
+    }
+    if (isNull(boundingBox.max.y)) {
+        boundingBox.max.y = 0;
+    }
+    if (isNull(boundingBox.min.y)) {
+        boundingBox.min.y = 0;
+    }
+    if (isNull(boundingBox.max.z)) {
+        boundingBox.max.z = 0;
+    }
+    if (isNull(boundingBox.min.z)) {
+        boundingBox.min.z = 0;
+    }
+    if (isNull(boundingBox.max.b)) {
+        boundingBox.max.b = 0;
+    }
+    if (isNull(boundingBox.min.b)) {
+        boundingBox.min.b = 0;
+    }
+};
+
 export const generateGcode = (modelInfos, onProgress) => {
     if (!modelInfos && !_.isArray(modelInfos) && modelInfos.length === 0) {
         return Promise.reject(new Error('modelInfo is empty.'));
     }
 
-    const { headerType } = modelInfos[0];
-    if (!_.includes(['laser', 'cnc'], headerType)) {
-        return Promise.reject(new Error(`Unsupported type: ${headerType}`));
+    const { headType } = modelInfos[0];
+    if (!_.includes(['laser', 'cnc'], headType)) {
+        return Promise.reject(new Error(`Unsupported type: ${headType}`));
     }
 
-    const suffix = headerType === 'laser' ? '.nc' : '.cnc';
+    const suffix = headType === 'laser' ? '.nc' : '.cnc';
 
     let fileTotalLines = 0;
     let estimatedTime = 0;
@@ -61,28 +92,31 @@ export const generateGcode = (modelInfos, onProgress) => {
     let boundingBox = null;
 
     const { uploadName } = modelInfos[0];
-    const outputFilename = pathWithRandomSuffix(path.parse(uploadName).name) + suffix;
+    const outputFilename = pathWithRandomSuffix(path.parse(uploadName).name + suffix);
     const outputFilePath = `${DataStorage.tmpDir}/${outputFilename}`;
     const outputFilePathTmp = `${outputFilePath}.tmp`;
 
     const writeStream = fs.createWriteStream(outputFilePathTmp, 'utf-8');
 
+    let isRotate;
+    let diameter;
+
     for (let i = 0; i < modelInfos.length; i++) {
         const modelInfo = modelInfos[i];
-        const { toolPathFilename, gcodeConfig, config, mode } = modelInfo;
+        const { toolPathFilename, gcodeConfig, mode } = modelInfo;
         const toolPathFilePath = `${DataStorage.tmpDir}/${toolPathFilename}`;
         const data = fs.readFileSync(toolPathFilePath, 'utf8');
         const toolPathObj = JSON.parse(data);
 
         const gcodeGenerator = new GcodeGenerator();
         let gcodeLines;
-        if (headerType === 'laser') {
+        if (headType === 'laser') {
             gcodeLines = gcodeGenerator.parseAsLaser(toolPathObj, gcodeConfig);
         } else {
             gcodeLines = gcodeGenerator.parseAsCNC(toolPathObj, gcodeConfig);
         }
 
-        const renderMethod = mode === 'greyscale' && config.movementMode === 'greyscale-dot' ? 'point' : 'line';
+        const renderMethod = mode === 'greyscale' && gcodeConfig.movementMode === 'greyscale-dot' ? 'point' : 'line';
 
         if (i > 0) {
             const header = '\n'
@@ -102,6 +136,9 @@ export const generateGcode = (modelInfos, onProgress) => {
             estimatedTime *= gcodeConfig.multiPasses;
         }
 
+        isRotate = toolPathObj.isRotate;
+        diameter = toolPathObj.diameter;
+
         if (boundingBox === null) {
             boundingBox = toolPathObj.boundingBox;
         } else {
@@ -111,31 +148,39 @@ export const generateGcode = (modelInfos, onProgress) => {
             boundingBox.min.y = Math.min(boundingBox.min.y, toolPathObj.boundingBox.min.y);
         }
 
+        checkoutBoundingBoxIsNull(boundingBox);
+
         onProgress((i + 1) / modelInfos.length);
     }
 
-    const { gcodeConfig, thumbnail, config, mode } = modelInfos[0];
-    const renderMethod = mode === 'greyscale' && config.movementMode === 'greyscale-dot' ? 'point' : 'line';
+    const { gcodeConfig, thumbnail, mode } = modelInfos[0];
+    const renderMethod = mode === 'greyscale' && gcodeConfig.movementMode === 'greyscale-dot' ? 'point' : 'line';
 
     const power = gcodeConfig.fixedPowerEnabled ? gcodeConfig.fixedPower : 0;
 
     let headerStart = ';Header Start\n'
-        + `;header_type: ${headerType}\n`
-        + `;thumbnail: ${thumbnail}\n`
+        + `;header_type: ${headType}\n`
         + `;renderMethod: ${renderMethod}\n`
         + ';file_total_lines: fileTotalLines\n'
         + `;estimated_time(s): ${estimatedTime}\n`
+        + `;is_rotate: ${isRotate}\n`
+        + `;diameter: ${diameter}\n`
         + `;max_x(mm): ${boundingBox.max.x}\n`
         + `;max_y(mm): ${boundingBox.max.y}\n`
         + `;max_z(mm): ${boundingBox.max.z}\n`
+        + `;max_b(mm): ${boundingBox.max.b}\n`
         + `;min_x(mm): ${boundingBox.min.x}\n`
         + `;min_y(mm): ${boundingBox.min.y}\n`
-        + `;min_z(mm): ${boundingBox.min.z}\n`
+        + `;min_b(mm): ${boundingBox.min.b}\n`
         + `;work_speed(mm/minute): ${gcodeConfig.workSpeed}\n`
         + `;jog_speed(mm/minute): ${gcodeConfig.jogSpeed}\n`
         + `;power(%): ${power}\n`
+        + `;thumbnail: ${thumbnail}\n`
         + ';Header End\n'
         + '\n';
+
+    fileTotalLines += headerStart.split('\n').length - 1;
+
     headerStart = headerStart.replace(/fileTotalLines/g, fileTotalLines);
 
 

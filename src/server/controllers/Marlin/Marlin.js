@@ -1,4 +1,5 @@
 import isEqual from 'lodash/isEqual';
+import isUndefined from 'lodash/isUndefined';
 import get from 'lodash/get';
 import set from 'lodash/set';
 import events from 'events';
@@ -127,7 +128,7 @@ class MarlinReplyParserFocusHeight {
     }
 }
 
-
+//  Enclosure STOP
 class MarlinReplyParserEmergencyStop {
     static parse(line) {
         const r = line.match(/;Locked UART/);
@@ -143,6 +144,22 @@ class MarlinReplyParserEmergencyStop {
     }
 }
 
+// Emergency STOP Button
+class MarlinReplyParserEmergencyStopButton {
+    static parse(line) {
+        // line message: 'emergency stop state'
+        const r = line.match(/^emergency stop state(.+)$/);
+        if (!r) {
+            return null;
+        }
+        return {
+            type: MarlinReplyParserEmergencyStopButton,
+            payload: {
+                releaseDate: r[1]
+            }
+        };
+    }
+}
 
 class MarlinReplyParserReleaseDate {
     static parse(line) {
@@ -175,6 +192,21 @@ class MarlinReplyParserToolHead {
     }
 }
 
+class MarlinReplyParserZAxisModule {
+    static parse(line) {
+        const r = line.match(/M1025 X[0-9.]+ Y[0-9.]+ Z([0-9.]+)$/);
+        if (!r) {
+            return null;
+        }
+        return {
+            type: MarlinReplyParserZAxisModule,
+            payload: {
+                zAxisModuleLength: r[1]
+            }
+        };
+    }
+}
+
 class MarlinReplyParserEnclosure {
     static parse(line) {
         const r = line.match(/^Enclosure: (On|Off)$/);
@@ -185,7 +217,23 @@ class MarlinReplyParserEnclosure {
         return {
             type: MarlinReplyParserEnclosure,
             payload: {
-                enclosure: r[1] === 'On'
+                enclosureDoorDetection: r[1] === 'On'
+            }
+        };
+    }
+}
+
+class MarlinReplyParserEnclosureOnline {
+    static parse(line) {
+        const r = line.match(/^Enclosure online: (On|Off)$/);
+        if (!r) {
+            return null;
+        }
+
+        return {
+            type: MarlinReplyParserEnclosureOnline,
+            payload: {
+                enclosureOnline: r[1] === 'On'
             }
         };
     }
@@ -193,15 +241,47 @@ class MarlinReplyParserEnclosure {
 
 class MarlinReplyParserEnclosureDoor {
     static parse(line) {
-        const r = line.match(/^Door: (Open|Closed)$/);
+        const r = line.match(/^Enclosure door: (Open|Closed)$/);
         if (!r) {
             return null;
         }
 
         return {
-            type: MarlinReplyParserEnclosure,
+            type: MarlinReplyParserEnclosureDoor,
             payload: {
-                enclosure: r[1] === 'Open'
+                enclosureDoor: r[1] === 'Open'
+            }
+        };
+    }
+}
+class MarlinReplyParserEnclosureLightPower {
+    static parse(line) {
+        const r = line.match(/^Enclosure light power: (0|100)$/);
+
+        if (!r) {
+            return null;
+        }
+
+        return {
+            type: MarlinReplyParserEnclosureLightPower,
+            payload: {
+                enclosureLight: Number(r[1])
+            }
+        };
+    }
+}
+
+class MarlinReplyParserEnclosureFanPower {
+    static parse(line) {
+        const r = line.match(/^Enclosure fan power: (0|100)$/);
+        if (!r) {
+            return null;
+        }
+
+        return {
+            type: MarlinReplyParserEnclosureFanPower,
+            payload: {
+                enclosureFan: Number(r[1])
             }
         };
     }
@@ -226,9 +306,9 @@ class MarlinLineParserResultStart {
 
 
 class MarlinLineParserResultPosition {
-    // X:0.00 Y:0.00 Z:0.00 E:0.00 Count X:0 Y:0 Z:0
+    // X:0.00 Y:0.00 Z:0.00 E:0.00 B:0.00 Count X:0 Y:0 Z:0
     static parse(line) {
-        const r = line.match(/^(?:(?:X|Y|Z|E):[0-9.-]+\s+)+/i);
+        const r = line.match(/^(?:(?:X|Y|Z|E|B):[0-9.-]+\s+)+/i);
         if (!r) {
             return null;
         }
@@ -236,7 +316,7 @@ class MarlinLineParserResultPosition {
         const payload = {
             pos: {}
         };
-        const pattern = /((X|Y|Z|E):[0-9.-]+)+/gi;
+        const pattern = /((X|Y|Z|E|B):[0-9.-]+)+/gi;
         const params = r[0].match(pattern);
 
         for (const param of params) {
@@ -247,6 +327,12 @@ class MarlinLineParserResultPosition {
                 const digits = decimalPlaces(pos);
                 payload.pos[axis] = Number(pos).toFixed(digits);
             }
+        }
+
+        if (isUndefined(payload.pos.b)) {
+            payload.pos.isFourAxis = false;
+        } else {
+            payload.pos.isFourAxis = true;
         }
 
         return {
@@ -459,6 +545,9 @@ class MarlinLineParser {
             // cnc emergency stop when enclosure open
             MarlinReplyParserEmergencyStop,
 
+            // emergency stop button
+            MarlinReplyParserEmergencyStopButton,
+
             // New Parsers (follow headType `MarlinReplyParserXXX`)
             // M1005
             MarlinReplyParserFirmwareVersion,
@@ -472,9 +561,14 @@ class MarlinLineParser {
             MarlinReplyParserReleaseDate,
             // M1006
             MarlinReplyParserToolHead,
+            // M1025
+            MarlinReplyParserZAxisModule,
             // M1010
             MarlinReplyParserEnclosure,
+            MarlinReplyParserEnclosureOnline,
             MarlinReplyParserEnclosureDoor,
+            MarlinReplyParserEnclosureFanPower,
+            MarlinReplyParserEnclosureLightPower,
 
             // start
             MarlinLineParserResultStart,
@@ -536,7 +630,8 @@ class Marlin extends events.EventEmitter {
             x: '0.000',
             y: '0.000',
             z: '0.000',
-            e: '0.000'
+            e: '0.000',
+            isFourAxis: false
         },
         modal: {
             motion: 'G0', // G0, G1, G2, G3, G38.2, G38.3, G38.4, G38.5, G80
@@ -576,6 +671,7 @@ class Marlin extends events.EventEmitter {
             y: 0,
             z: 0
         },
+        zAxisModule: 0, // 0: standard module, 1: extension module
         hexModeEnabled: false,
         isScreenProtocol: false
     };
@@ -583,7 +679,10 @@ class Marlin extends events.EventEmitter {
     settings = {
         // whether enclosure is turned on
         enclosure: false,
-        enclosureDoor: false
+        enclosureDoor: false,
+        enclosureOnline: false,
+        enclosureLight: 0,
+        enclosureFan: 0
     };
 
     parser = new MarlinLineParser();
@@ -633,6 +732,12 @@ class Marlin extends events.EventEmitter {
                 this.setState({ headType: payload.headType });
             }
             this.emit('headType', payload);
+        } else if (type === MarlinReplyParserZAxisModule) {
+            // 1: 221.00, 0: 128.00
+            const zAxisModule = (payload.zAxisModuleLength > 200 ? 1 : 0);
+            if (this.settings.zAxisModule !== zAxisModule) {
+                this.setState({ zAxisModule: zAxisModule });
+            }
         } else if (type === MarlinReplyParserFocusHeight) {
             if (this.state.zFocus !== payload.zFocus) {
                 this.setState({ zFocus: payload.zFocus });
@@ -648,9 +753,24 @@ class Marlin extends events.EventEmitter {
                 this.setState({ headStatus: payload.headStatus });
             }
             this.emit('headStatus', payload);
+        } else if (type === MarlinReplyParserEnclosureLightPower) {
+            if (this.settings.enclosureLight !== payload.enclosureLight) {
+                this.set({ enclosureLight: payload.enclosureLight });
+            }
+            this.emit('enclosure', payload);
+        } else if (type === MarlinReplyParserEnclosureFanPower) {
+            if (this.settings.enclosureFan !== payload.enclosureFan) {
+                this.set({ enclosureFan: payload.enclosureFan });
+            }
+            this.emit('enclosure', payload);
         } else if (type === MarlinReplyParserEnclosure) {
-            if (this.settings.enclosure !== payload.enclosure) {
-                this.set({ enclosure: payload.enclosure });
+            if (this.settings.enclosureDoorDetection !== payload.enclosureDoorDetection) {
+                this.set({ enclosureDoorDetection: payload.enclosureDoorDetection });
+            }
+            this.emit('enclosure', payload);
+        } else if (type === MarlinReplyParserEnclosureOnline) {
+            if (this.settings.enclosureOnline !== payload.enclosureOnline) {
+                this.set({ enclosureOnline: payload.enclosureOnline });
             }
             this.emit('enclosure', payload);
         } else if (type === MarlinReplyParserEnclosureDoor) {
@@ -662,6 +782,8 @@ class Marlin extends events.EventEmitter {
             this.emit('start', payload);
         } else if (type === MarlinReplyParserEmergencyStop) {
             this.emit('cnc:stop', payload);
+        } else if (type === MarlinReplyParserEmergencyStopButton) {
+            this.emit('emergencyStop', payload);
         } else if (type === MarlinParserOriginOffset) {
             this.setState({
                 originOffset: {

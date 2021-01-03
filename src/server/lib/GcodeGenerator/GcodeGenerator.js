@@ -3,22 +3,22 @@ class GcodeGenerator {
         if (!toolPathObj || !gcodeConfig) {
             return null;
         }
-        const { headerType } = toolPathObj;
-        if (!['cnc', 'laser', '3dp'].includes(headerType)) {
+        const { headType } = toolPathObj;
+        if (!['cnc', 'laser', '3dp'].includes(headType)) {
             return null;
         }
 
         let gcodeStr = '';
-        if (headerType === 'cnc') {
+        if (headType === 'cnc') {
             gcodeStr = this.parseAsCNC(toolPathObj, gcodeConfig);
-        } else if (headerType === 'laser') {
+        } else if (headType === 'laser') {
             gcodeStr = this.parseAsLaser(toolPathObj, gcodeConfig);
         }
         return gcodeStr;
     }
 
     parseAsCNC(toolPathObj, gcodeConfig) {
-        const { data, positionX, positionY } = toolPathObj;
+        const { data, positionX, positionY, rotationB } = toolPathObj;
         const gcodeConfigKeys = Object.keys(gcodeConfig);
         const gcodeLines = [];
         for (let i = 0; i < data.length; i++) {
@@ -39,8 +39,12 @@ class GcodeGenerator {
                         value += positionX;
                     } else if (key === 'Y' && !!positionY) {
                         value += positionY;
+                    } else if (key === 'B') {
+                        if (rotationB) {
+                            value += rotationB;
+                        }
                     }
-                    if (key === 'X' || key === 'Y' || key === 'Z') {
+                    if (key === 'X' || key === 'Y' || key === 'Z' || key === 'B') {
                         cmds.push(key + value.toFixed(2)); // restrict precision
                     } else {
                         cmds.push(key + value); // restrict precision
@@ -59,7 +63,7 @@ class GcodeGenerator {
     }
 
     parseAsLaser(toolPathObj, gcodeConfig) {
-        const { data, positionX, positionY } = toolPathObj;
+        const { data, positionX, positionY, rotationB } = toolPathObj;
         // process "jogSpeed, workSpeed..."
         const gcodeConfigKeys = Object.keys(gcodeConfig);
         const gcodeLines = [];
@@ -81,8 +85,10 @@ class GcodeGenerator {
                         value += positionX;
                     } else if (key === 'Y' && !!positionY) {
                         value += positionY;
+                    } else if (key === 'B' && !!rotationB) {
+                        value += rotationB;
                     }
-                    if (key === 'X' || key === 'Y' || key === 'Z') {
+                    if (key === 'X' || key === 'Y' || key === 'Z' || key === 'B') {
                         cmds.push(key + value.toFixed(2)); // restrict precision
                     } else {
                         cmds.push(key + value); // restrict precision

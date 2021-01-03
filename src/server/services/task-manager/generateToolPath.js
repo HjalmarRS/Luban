@@ -2,13 +2,21 @@ import fs from 'fs';
 import path from 'path';
 import { pathWithRandomSuffix } from '../../../shared/lib/random-utils';
 import DataStorage from '../../DataStorage';
-import processImage from '../../lib/image-process';
+import { editorProcess } from '../../lib/editor/process';
 import { LaserToolPathGenerator } from '../../lib/ToolPathGenerator';
-import SVGParser from '../../lib/SVGParser';
+import SVGParser from '../../../shared/lib/SVGParser';
 import { parseDxf, dxfToSvg, updateDxfBoundingBox } from '../../../shared/lib/DXFParser/Parser';
 import CncToolPathGenerator from '../../lib/ToolPathGenerator/CncToolPathGenerator';
 import CncReliefToolPathGenerator from '../../lib/ToolPathGenerator/CncReliefToolPathGenerator';
 import logger from '../../lib/logger';
+import {
+    PROCESS_MODE_GREYSCALE,
+    PROCESS_MODE_VECTOR,
+    SOURCE_TYPE_DXF,
+    SOURCE_TYPE_IMAGE3D,
+    SOURCE_TYPE_SVG
+} from '../../constants';
+import CncMeshToolPathGenerator from '../../lib/ToolPathGenerator/MeshToolPath/CncMeshToolPathGenerator';
 
 const log = logger('service:TaskManager');
 
@@ -17,25 +25,42 @@ const generateLaserToolPath = async (modelInfo, onProgress) => {
     // const { mode, source } = modelInfo;
     // const originFilename = source.filename;
     const { sourceType, mode, uploadName } = modelInfo;
-    const outputFilename = pathWithRandomSuffix(path.parse(uploadName).name) + suffix;
+    const outputFilename = pathWithRandomSuffix(path.parse(uploadName).name + suffix);
     const outputFilePath = `${DataStorage.tmpDir}/${outputFilename}`;
 
     let modelPath = null;
     // no need to process model
-    if (((sourceType === 'svg' || sourceType === 'dxf') && (mode === 'vector' || mode === 'trace')) || (sourceType === 'text' && mode === 'vector')) {
+    if (((sourceType === SOURCE_TYPE_SVG || sourceType === SOURCE_TYPE_DXF)
+        && (mode === PROCESS_MODE_VECTOR))) {
         modelPath = `${DataStorage.tmpDir}/${uploadName}`;
     } else {
+        if (uploadName.indexOf('svg') > 0) {
+            return Promise.reject(new Error('process image need an image uploadName'));
+        }
         // processImage: do "scale, rotate, greyscale/bw"
-        const result = await processImage(modelInfo);
+        try {
+            const result = await editorProcess(modelInfo);
+            modelPath = `${DataStorage.tmpDir}/${result.filename}`;
+        } catch (e) {
+            return Promise.reject(new Error(`process Image Error ${e.message}`));
+        }
+        const result = await editorProcess(modelInfo);
         modelPath = `${DataStorage.tmpDir}/${result.filename}`;
     }
 
     if (modelPath) {
-        const generator = new LaserToolPathGenerator();
+        const generator = new LaserToolPathGenerator(modelInfo);
         generator.on('progress', (p) => {
             onProgress(p);
         });
-        const toolPath = await generator.generateToolPathObj(modelInfo, modelPath);
+
+        let toolPath;
+        try {
+            toolPath = await generator.generateToolPathObj(modelInfo, modelPath);
+        } catch (e) {
+            console.log(e);
+        }
+
         return new Promise((resolve, reject) => {
             fs.writeFile(outputFilePath, JSON.stringify(toolPath), 'utf8', (err) => {
                 if (err) {
@@ -60,24 +85,26 @@ const generateCncToolPath = async (modelInfo, onProgress) => {
     const { sourceType, mode, uploadName } = modelInfo;
     // const originFilename = uploadName;
     const modelPath = `${DataStorage.tmpDir}/${uploadName}`;
+
+    // const originFilename = uploadName;
     const outputFilename = pathWithRandomSuffix(`${uploadName}.${suffix}`);
     const outputFilePath = `${DataStorage.tmpDir}/${outputFilename}`;
 
-    if (((sourceType === 'svg' || sourceType === 'dxf') && (mode === 'vector' || mode === 'trace')) || (sourceType === 'text' && mode === 'vector')) {
+    if (((sourceType === 'svg' || sourceType === 'dxf') && (mode === 'vector' || mode === 'trace')) || (sourceType === 'raster' && mode === 'vector')) {
         let toolPath;
         if (sourceType === 'dxf') {
             let { svg } = await parseDxf(modelPath);
             svg = dxfToSvg(svg);
             updateDxfBoundingBox(svg);
 
-            const generator = new CncToolPathGenerator();
+            const generator = new CncToolPathGenerator(modelInfo);
             generator.on('progress', (p) => onProgress(p));
             toolPath = await generator.generateToolPathObj(svg, modelInfo);
         } else {
             const svgParser = new SVGParser();
             const svg = await svgParser.parseFile(modelPath);
 
-            const generator = new CncToolPathGenerator();
+            const generator = new CncToolPathGenerator(modelInfo);
             generator.on('progress', (p) => onProgress(p));
             toolPath = await generator.generateToolPathObj(svg, modelInfo);
         }
@@ -93,7 +120,28 @@ const generateCncToolPath = async (modelInfo, onProgress) => {
                 }
             });
         });
-    } else if (sourceType === 'raster' && mode === 'greyscale') {
+    } else if (sourceType === SOURCE_TYPE_IMAGE3D && mode === PROCESS_MODE_GREYSCALE) {
+        // TODO Parameters used twice resulted in no invert
+        modelInfo.config.invert = false;
+
+        const generator = new CncMeshToolPathGenerator(modelInfo);
+        generator.on('progress', (p) => onProgress(p));
+
+        const toolPath = await generator.generateToolPathObj();
+
+        return new Promise((resolve, reject) => {
+            fs.writeFile(outputFilePath, JSON.stringify(toolPath), 'utf8', (err) => {
+                if (err) {
+                    log.error(err);
+                    reject(err);
+                } else {
+                    resolve({
+                        filename: outputFilename
+                    });
+                }
+            });
+        });
+    } else if (mode === PROCESS_MODE_GREYSCALE) {
         const generator = new CncReliefToolPathGenerator(modelInfo, modelPath);
         generator.on('progress', (p) => onProgress(p));
 
@@ -121,12 +169,12 @@ export const generateToolPath = (modelInfo, onProgress) => {
         return Promise.reject(new Error('modelInfo is empty.'));
     }
 
-    const { headerType } = modelInfo;
-    if (headerType === 'laser') {
+    const { headType } = modelInfo;
+    if (headType === 'laser') {
         return generateLaserToolPath(modelInfo, onProgress);
-    } else if (headerType === 'cnc') {
+    } else if (headType === 'cnc') {
         return generateCncToolPath(modelInfo, onProgress);
     } else {
-        return Promise.reject(new Error(`Unsupported type: ${headerType}`));
+        return Promise.reject(new Error(`Unsupported type: ${headType}`));
     }
 };

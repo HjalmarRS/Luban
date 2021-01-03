@@ -1,160 +1,80 @@
 import React, { PureComponent } from 'react';
 import { connect } from 'react-redux';
-import classNames from 'classnames';
 import PropTypes from 'prop-types';
-
-import { EXPERIMENTAL_IMAGE_TRACING_CNC } from '../../constants';
-import i18n from '../../lib/i18n';
-import { actions as sharedActions } from '../../flux/cncLaserShared';
-import SvgTrace from '../CncLaserShared/SvgTrace';
-import Transformation from '../CncLaserShared/Transformation';
-import GcodeParameters from '../CncLaserShared/GcodeParameters';
-import TextParameters from '../CncLaserShared/TextParameters';
-import ReliefParameters from './ReliefParameters';
-import VectorParameters from './VectorParameters';
-import Anchor from '../../components/Anchor';
-import Modal from '../../components/Modal';
-import modal from '../../lib/modal';
-import api from '../../api';
+import classNames from 'classnames';
+import Select from 'react-select';
 import styles from './styles.styl';
-
-const getAccept = (uploadMode) => {
-    let accept = '';
-    if (['greyscale'].includes(uploadMode)) {
-        accept = '.png, .jpg, .jpeg, .bmp';
-    } else if (['vector'].includes(uploadMode)) {
-        accept = '.svg, .dxf';
-    } else if (['trace'].includes(uploadMode)) {
-        accept = '.svg, .png, .jpg, .jpeg, .bmp';
-    }
-    return accept;
-};
+import { PAGE_EDITOR, PAGE_PROCESS, SOURCE_TYPE_IMAGE3D } from '../../constants';
+import i18n from '../../lib/i18n';
+import Anchor from '../../components/Anchor';
+import TextParameters from '../CncLaserShared/TextParameters';
+import Transformation from '../CncLaserShared/Transformation';
+// import GcodeParameters from '../CncLaserShared/GcodeParameters';
+import GcodeParametersForCnc from '../CncLaserShared/GcodeParametersForCnc';
+import VectorParameters from './VectorParameters';
+import Image3dParameters from './Image3dParameters';
+import ImageProcessMode from './ImageProcessMode';
+import ReliefGcodeParameters from './gcodeconfig/ReliefGcodeParameters';
+import Image3DGcodeParameters from './gcodeconfig/Image3DGcodeParameters';
+import { actions as editorActions } from '../../flux/editor';
+import { actions as cncActions } from '../../flux/cnc';
 
 class CNCPath extends PureComponent {
     static propTypes = {
         setTitle: PropTypes.func.isRequired,
 
-        // model: PropTypes.object,
-        selectedModelID: PropTypes.string,
+        page: PropTypes.string.isRequired,
+
+        modelGroup: PropTypes.object,
+        toolDefinitions: PropTypes.array.isRequired,
+        selectedModelArray: PropTypes.array,
+        selectedModelVisible: PropTypes.bool,
         sourceType: PropTypes.string,
         mode: PropTypes.string.isRequired,
+        showOrigin: PropTypes.bool,
         config: PropTypes.object.isRequired,
-        transformation: PropTypes.object.isRequired,
+        // transformation: PropTypes.object.isRequired,
         gcodeConfig: PropTypes.object.isRequired,
         printOrder: PropTypes.number.isRequired,
-        uploadImage: PropTypes.func.isRequired,
+        selectedModel: PropTypes.object,
+
+        // functions
+        setDisplay: PropTypes.func.isRequired,
+
         updateSelectedModelTransformation: PropTypes.func.isRequired,
+        updateSelectedModelUniformScalingState: PropTypes.func.isRequired,
         updateSelectedModelGcodeConfig: PropTypes.func.isRequired,
         updateSelectedModelPrintOrder: PropTypes.func.isRequired,
-        insertDefaultTextVector: PropTypes.func.isRequired,
-        updateSelectedModelTextConfig: PropTypes.func.isRequired,
-        onModelAfterTransform: PropTypes.func.isRequired,
-        setAutoPreview: PropTypes.func.isRequired
+        changeSelectedModelMode: PropTypes.func.isRequired,
+        changeActiveToolListDefinition: PropTypes.func.isRequired,
+        updateSelectedModelConfig: PropTypes.func.isRequired,
+        changeSelectedModelShowOrigin: PropTypes.func.isRequired,
+
+        // operator functions
+        modifyText: PropTypes.func.isRequired,
+        updateShowCncToolManager: PropTypes.func.isRequired
     };
 
-    fileInput = React.createRef();
-
     state = {
-        uploadMode: '', // raster, vector
-        from: 'cnc',
-        mode: '', // bw, greyscale, vector
-        accept: '',
-        options: {
-            originalName: '',
-            uploadName: '',
-            width: 0,
-            height: 0,
-            blackThreshold: 30,
-            maskThreshold: 28,
-            iterations: 1,
-            colorRange: 15,
-            numberOfObjects: 2
-        },
-        modalSetting: {
-            width: 640,
-            height: 640
-        },
-        traceFilenames: [],
-        status: 'Idle',
-        showModal: false
+        activeToolListDefinition: null
     };
 
     actions = {
-        onClickToUpload: (uploadMode) => {
-            this.setState({
-                uploadMode: uploadMode,
-                accept: getAccept(uploadMode)
-            }, () => {
-                this.fileInput.current.value = null;
-                this.fileInput.current.click();
-            });
+        onShowCncToolManager: () => {
+            this.props.updateShowCncToolManager(true);
         },
-        processTrace: () => {
-            this.setState({
-                status: 'Busy'
-            });
-            api.processTrace(this.state.options)
-                .then((res) => {
-                    this.setState({
-                        traceFilenames: res.body.filenames,
-                        status: 'Idle',
-                        showModal: true
-                    });
-                });
-        },
-        onChangeFile: (event) => {
-            const file = event.target.files[0];
-
-            const uploadMode = this.state.uploadMode;
-            if (uploadMode === 'trace') {
+        onChangeActiveToolListValue: (option) => {
+            const definitionId = option.definitionId;
+            const name = option.name;
+            const activeToolCategory = this.props.toolDefinitions.find(d => d.definitionId === definitionId);
+            const toolListDefinition = activeToolCategory.toolList.find(k => k.name === name);
+            toolListDefinition.definitionId = definitionId;
+            if (toolListDefinition) {
                 this.setState({
-                    mode: uploadMode
+                    activeToolListDefinition: toolListDefinition
                 });
-                const formData = new FormData();
-                formData.append('image', file);
-                api.uploadImage(formData)
-                    .then(async (res) => {
-                        const newOptions = {
-                            originalName: res.body.originalName,
-                            uploadName: res.body.uploadName,
-                            width: res.body.width,
-                            height: res.body.height
-                        };
-                        this.actions.updateOptions(newOptions);
-                        await this.actions.processTrace();
-                    });
-            } else {
-                if (uploadMode === 'greyscale') {
-                    this.props.setAutoPreview(false);
-                }
-                this.props.uploadImage(file, uploadMode, () => {
-                    modal({
-                        title: i18n._('Parse Image Error'),
-                        body: i18n._('Failed to parse image file {{filename}}', { filename: file.name })
-                    });
-                });
+                this.props.changeActiveToolListDefinition(definitionId, name);
             }
-        },
-        updateOptions: (options) => {
-            this.setState({
-                options: {
-                    ...this.state.options,
-                    ...options
-                }
-            });
-        },
-        onClickInsertText: () => {
-            this.props.insertDefaultTextVector();
-        },
-        updateModalSetting: (setting) => {
-            this.setState({
-                modalSetting: setting
-            });
-        },
-        hideModal: () => {
-            this.setState({
-                showModal: false
-            });
         }
     };
 
@@ -163,114 +83,136 @@ class CNCPath extends PureComponent {
         this.props.setTitle(i18n._('Configurations'));
     }
 
+    componentDidMount() {
+        const { modelGroup } = this.props;
+        if (modelGroup.getSelectedModelArray().length > 0) {
+            this.props.setDisplay(true);
+        } else {
+            this.props.setDisplay(false);
+        }
+    }
+
+    componentWillReceiveProps(nextProps) {
+        const { modelGroup } = nextProps;
+        if (modelGroup.getSelectedModelArray().length > 0) {
+            this.props.setDisplay(true);
+        } else {
+            this.props.setDisplay(false);
+        }
+        // Load 'toolDefinitions' and compose the content of the tool select
+        if (nextProps.toolDefinitions !== this.props.toolDefinitions) {
+            const newState = {};
+            if (this.props.toolDefinitions.length === 0) {
+                const activeToolCategory = nextProps.toolDefinitions.find(d => d.definitionId === 'Default');
+                const activeToolListDefinition = activeToolCategory.toolList.find(k => k.name === 'snap.v-bit');
+                activeToolListDefinition.definitionId = activeToolCategory && activeToolCategory.definitionId;
+                Object.assign(newState, {
+                    activeToolListDefinition
+                });
+            } else {
+                const activeToolCategory = nextProps.toolDefinitions.find(d => d.definitionId === this.state.activeToolListDefinition.definitionId) || nextProps.toolDefinitions.find(d => d.definitionId === 'Default');
+                const activeToolListDefinition = activeToolCategory.toolList.find(k => k.name === this.state.activeToolListDefinition.name)
+                        || activeToolCategory.toolList.find(k => k.name === 'snap.v-bit');
+                if (activeToolListDefinition) {
+                    activeToolListDefinition.definitionId = activeToolCategory && activeToolCategory.definitionId;
+                    Object.assign(newState, {
+                        activeToolListDefinition
+                    });
+                }
+            }
+            const toolDefinitionOptions = [];
+            nextProps.toolDefinitions.forEach(d => {
+                const category = d.category;
+                const definitionId = d.definitionId;
+                toolDefinitionOptions.push(...d.toolList.map((item) => {
+                    const checkboxAndSelectGroup = {};
+                    const name = item.name;
+                    checkboxAndSelectGroup.name = name;
+                    checkboxAndSelectGroup.definitionId = definitionId;
+                    checkboxAndSelectGroup.label = `${category} - ${name}`;
+                    checkboxAndSelectGroup.value = `${definitionId}-${name}`;
+                    return checkboxAndSelectGroup;
+                }));
+            });
+            Object.assign(newState, {
+                toolDefinitionOptions: toolDefinitionOptions
+            });
+            this.setState(newState);
+        }
+    }
+
     render() {
-        const actions = this.actions;
-        const { accept } = this.state;
         const {
-            selectedModelID, sourceType, mode,
-            transformation, updateSelectedModelTransformation,
+            page, selectedModelArray,
+            selectedModelVisible, sourceType, mode,
+            showOrigin,
+            updateSelectedModelTransformation,
             gcodeConfig, updateSelectedModelGcodeConfig,
-            printOrder, updateSelectedModelPrintOrder, config, updateSelectedModelTextConfig,
-            onModelAfterTransform
+            printOrder, updateSelectedModelPrintOrder, config,
+            changeSelectedModelShowOrigin, changeSelectedModelMode,
+            updateSelectedModelUniformScalingState,
+            selectedModel,
+            modifyText,
+            updateSelectedModelConfig
         } = this.props;
-        const { width, height } = this.state.modalSetting;
+        const selectedNotHide = selectedModelArray && selectedModelArray.length === 1 && selectedModelVisible;
 
-        const isRasterGreyscale = (sourceType === 'raster' && mode === 'greyscale');
+        const isGreyscale = sourceType !== 'image3d' && mode === 'greyscale';
+        const { toolDefinitionOptions, activeToolListDefinition } = this.state;
         const isSvgVector = ((sourceType === 'svg' || sourceType === 'dxf') && mode === 'vector');
-        const isTextVector = (sourceType === 'text' && mode === 'vector');
-
+        const isTextVector = (config.svgNodeName === 'text');
+        const isImage3d = (sourceType === SOURCE_TYPE_IMAGE3D);
+        const isEditor = page === PAGE_EDITOR;
+        const isProcess = page === PAGE_PROCESS;
+        const showImageProcessMode = (sourceType === 'raster' || sourceType === 'svg') && config.svgNodeName !== 'text';
+        let methodType;
+        if (isImage3d) {
+            methodType = 'Carve';
+        } else if (isSvgVector || isTextVector) {
+            methodType = 'Contour';
+        } else if (isGreyscale) {
+            methodType = 'Carve';
+        }
         return (
             <React.Fragment>
-                <input
-                    ref={this.fileInput}
-                    type="file"
-                    accept={accept}
-                    style={{ display: 'none' }}
-                    multiple={false}
-                    onChange={actions.onChangeFile}
-                />
-                {this.state.mode === 'trace' && this.state.showModal && (
-                    <Modal style={{ width: `${width}px`, height: `${height}px` }} size="lg" onClose={this.actions.hideModal}>
-                        <Modal.Body style={{ margin: '0', padding: '0', height: '100%' }}>
-                            <SvgTrace
-                                state={this.state}
-                                from={this.state.from}
-                                traceFilenames={this.state.traceFilenames}
-                                status={this.state.status}
-                                actions={this.actions}
-                            />
-                        </Modal.Body>
-                    </Modal>
+                {isEditor && (
+                    <Transformation
+                        headType="cnc"
+                        updateSelectedModelTransformation={updateSelectedModelTransformation}
+                        updateSelectedModelUniformScalingState={updateSelectedModelUniformScalingState}
+
+                    />
                 )}
-                <div className={styles['laser-modes']}>
-                    <div className={classNames(styles['laser-mode'])}>
-                        <Anchor
-                            className={styles['laser-mode__btn']}
-                            onClick={() => actions.onClickToUpload('greyscale')}
-                        >
-                            <i className={styles['laser-mode__icon-greyscale']} />
-                        </Anchor>
-                        <span className={styles['laser-mode__text']}>{i18n._('RELIEF')}</span>
-                    </div>
-                    <div className={classNames(styles['laser-mode'])}>
-                        <Anchor
-                            className={styles['laser-mode__btn']}
-                            onClick={() => actions.onClickToUpload('vector')}
-                        >
-                            <i className={styles['laser-mode__icon-vector']} />
-                        </Anchor>
-                        <span className={styles['laser-mode__text']}>{i18n._('VECTOR')}</span>
-                    </div>
-                    <div className={classNames(styles['laser-mode'])} style={{ marginRight: '0' }}>
-                        <Anchor
-                            className={classNames(styles['laser-mode__btn'])}
-                            onClick={() => actions.onClickInsertText()}
-                        >
-                            <i className={styles['laser-mode__icon-text']} />
-                        </Anchor>
-                        <span className={styles['laser-mode__text']}>{i18n._('TEXT')}</span>
-                    </div>
-                    {EXPERIMENTAL_IMAGE_TRACING_CNC && (
-                        <div className={classNames(styles['laser-mode'])}>
-                            <Anchor
-                                className={styles['laser-mode__btn']}
-                                onClick={() => {
-                                    actions.onClickToUpload('trace');
-                                }}
-                            >
-                                <i className={styles['laser-mode__icon-vector']} />
-                            </Anchor>
-                            <span className={styles['laser-mode__text']}>{i18n._('TRACE')}</span>
-                        </div>
-                    )}
-                </div>
-                {selectedModelID && (
-                    <div className="sm-parameter-container">
-                        <div className={styles.separator} />
-                        <div style={{ marginTop: '15px' }} />
-                        <Transformation
-                            transformation={transformation}
-                            sourceType={sourceType}
-                            updateSelectedModelTransformation={updateSelectedModelTransformation}
-                            onModelAfterTransform={onModelAfterTransform}
-                        />
-                        {isRasterGreyscale && (
-                            <ReliefParameters />
+                {isProcess && (
+                    <div>
+                        <div className={classNames(
+                            styles['material-select']
                         )}
-                        {isTextVector && (
-                            <TextParameters
-                                config={config}
-                                updateSelectedModelTextConfig={updateSelectedModelTextConfig}
+                        >
+                            <Select
+                                clearable={false}
+                                searchable
+                                options={toolDefinitionOptions}
+                                value={`${activeToolListDefinition.definitionId}-${activeToolListDefinition.name}`}
+                                onChange={this.actions.onChangeActiveToolListValue}
                             />
-                        )}
-                        {(isSvgVector || isTextVector) && (
-                            <VectorParameters />
-                        )}
-                        <GcodeParameters
+                        </div>
+                        <Anchor
+                            onClick={this.actions.onShowCncToolManager}
+                        >
+                            <span
+                                className={classNames(
+                                    styles['manager-icon'],
+                                )}
+                            />
+                        </Anchor>
+                        <GcodeParametersForCnc
+                            selectedModelArray={selectedModelArray}
+                            selectedModelVisible={selectedModelVisible}
                             printOrder={printOrder}
                             gcodeConfig={gcodeConfig}
-                            updateSelectedModelGcodeConfig={updateSelectedModelGcodeConfig}
                             updateSelectedModelPrintOrder={updateSelectedModelPrintOrder}
+                            updateSelectedModelGcodeConfig={updateSelectedModelGcodeConfig}
                             paramsDescs={
                                 {
                                     jogSpeed: i18n._('Determines how fast the tool moves when it’s not carving.'),
@@ -281,39 +223,104 @@ class CNCPath extends PureComponent {
                         />
                     </div>
                 )}
+                {selectedModelArray.length === 1 && (
+                    <div className="sm-parameter-container">
+                        {isEditor && showImageProcessMode && (selectedModelArray.length === 1) && (
+                            <ImageProcessMode
+                                sourceType={sourceType}
+                                mode={mode}
+                                disabled={!selectedNotHide}
+                                showOrigin={showOrigin}
+                                changeSelectedModelShowOrigin={changeSelectedModelShowOrigin}
+                                changeSelectedModelMode={changeSelectedModelMode}
+                            />
+                        )}
+                        {isEditor && isTextVector && (
+                            <TextParameters
+                                disabled={!selectedModelVisible}
+                                config={config}
+                                headType="cnc"
+                                selectedModel={selectedModel}
+                                modifyText={modifyText}
+                            />
+                        )}
+                        {isEditor && isImage3d && (
+                            <Image3dParameters
+                                disabled={!selectedModelVisible}
+                                config={config}
+                                updateSelectedModelConfig={updateSelectedModelConfig}
+                            />
+                        )}
+                        {isProcess && (isSvgVector) && (
+                            <VectorParameters
+                                methodType={methodType}
+                                disabled={!selectedModelVisible}
+                            />
+                        )}
+                        {isProcess && isGreyscale && !isImage3d && (
+                            <ReliefGcodeParameters
+                                methodType={methodType}
+                                disabled={!selectedModelVisible}
+                            />
+                        )}
+                        {isProcess && isImage3d && (
+                            <Image3DGcodeParameters
+                                methodType={methodType}
+                                disabled={!selectedModelVisible}
+                            />
+                        )}
+                    </div>
+                )}
             </React.Fragment>
         );
     }
 }
 
+// todo, selected model will be instead
 const mapStateToProps = (state) => {
-    // const { model, transformation, gcodeConfig, printOrder, config } = state.cnc;
-    // const sourceType = model ? model.modelInfo.source.type : '';
-    // const mode = model ? model.modelInfo.mode : '';
-    const { selectedModelID, sourceType, mode, transformation, gcodeConfig, printOrder, config } = state.cnc;
-
+    const { page, modelGroup, toolPathModelGroup, printOrder, toolDefinitions } = state.cnc;
+    const selectedModel = modelGroup.getSelectedModel();
+    const gcodeConfig = toolPathModelGroup.getSelectedModel().gcodeConfig;
+    const selectedModelID = selectedModel.modelID;
+    const {
+        sourceType,
+        mode,
+        showOrigin,
+        transformation,
+        config
+    } = selectedModel;
+    const selectedModelArray = modelGroup.getSelectedModelArray();
     return {
+        selectedModelArray,
+        page,
         printOrder,
         transformation,
         gcodeConfig,
-        // model,
         selectedModelID,
+        selectedModel,
+        toolDefinitions,
+        // todo, next version fix like selectedModelID
+        selectedModelVisible: modelGroup.getSelectedModel() && modelGroup.getSelectedModel().visible,
+        modelGroup,
         sourceType,
         mode,
+        showOrigin,
         config
     };
 };
 
 const mapDispatchToProps = (dispatch) => {
     return {
-        uploadImage: (file, mode, onFailure) => dispatch(sharedActions.uploadImage('cnc', file, mode, onFailure)),
-        updateSelectedModelTransformation: (params) => dispatch(sharedActions.updateSelectedModelTransformation('cnc', params)),
-        updateSelectedModelGcodeConfig: (params) => dispatch(sharedActions.updateSelectedModelGcodeConfig('cnc', params)),
-        updateSelectedModelPrintOrder: (printOrder) => dispatch(sharedActions.updateSelectedModelPrintOrder('cnc', printOrder)),
-        setAutoPreview: (value) => dispatch(sharedActions.setAutoPreview('cnc', value)),
-        insertDefaultTextVector: () => dispatch(sharedActions.insertDefaultTextVector('cnc')),
-        updateSelectedModelTextConfig: (config) => dispatch(sharedActions.updateSelectedModelTextConfig('cnc', config)),
-        onModelAfterTransform: () => dispatch(sharedActions.onModelAfterTransform('cnc'))
+        changeActiveToolListDefinition: (definitionId, name) => dispatch(cncActions.changeActiveToolListDefinition(definitionId, name)),
+        updateShowCncToolManager: (showCncToolManager) => dispatch(cncActions.updateShowCncToolManager(showCncToolManager)),
+        updateSelectedModelTransformation: (params, changeFrom) => dispatch(editorActions.updateSelectedModelTransformation('cnc', params, changeFrom)),
+        updateSelectedModelUniformScalingState: (params) => dispatch(editorActions.updateSelectedModelTransformation('cnc', params)),
+        updateSelectedModelConfig: (params) => dispatch(editorActions.updateSelectedModelConfig('cnc', params)),
+        updateSelectedModelGcodeConfig: (params) => dispatch(editorActions.updateSelectedModelGcodeConfig('cnc', params)),
+        updateSelectedModelPrintOrder: (printOrder) => dispatch(editorActions.updateSelectedModelPrintOrder('cnc', printOrder)),
+        changeSelectedModelShowOrigin: () => dispatch(editorActions.changeSelectedModelShowOrigin('cnc')),
+        changeSelectedModelMode: (sourceType, mode) => dispatch(editorActions.changeSelectedModelMode('cnc', sourceType, mode)),
+        modifyText: (element, options) => dispatch(editorActions.modifyText('cnc', element, options))
     };
 };
 
