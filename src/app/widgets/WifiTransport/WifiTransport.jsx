@@ -20,6 +20,8 @@ import {
     MACHINE_HEAD_TYPE
 } from '../../constants';
 import { actions as workspaceActions } from '../../flux/workspace';
+import { actions as projectActions } from '../../flux/project';
+
 import modalSmallHOC from '../../components/Modal/modal-small';
 
 
@@ -39,6 +41,7 @@ class WifiTransport extends PureComponent {
 
         renameGcodeFile: PropTypes.func.isRequired,
         removeGcodeFile: PropTypes.func.isRequired,
+        exportFile: PropTypes.func.isRequired,
 
         uploadGcodeFile: PropTypes.func.isRequired,
         renderGcodeFile: PropTypes.func.isRequired,
@@ -60,7 +63,6 @@ class WifiTransport extends PureComponent {
     actions = {
         onChangeFile: async (event) => {
             const file = event.target.files[0];
-
             const { loadToWorkspaceOnLoad } = this.state;
 
             if (loadToWorkspaceOnLoad) {
@@ -73,7 +75,12 @@ class WifiTransport extends PureComponent {
             this.fileInput.current.value = null;
             this.fileInput.current.click();
         },
-
+        onExport: () => {
+            if (!this.state.selectFileName) {
+                return;
+            }
+            this.props.exportFile(this.state.selectFileName);
+        },
         onChangeShouldPreview: () => {
             this.setState(state => ({
                 loadToWorkspaceOnLoad: !state.loadToWorkspaceOnLoad
@@ -176,7 +183,7 @@ class WifiTransport extends PureComponent {
                     } else {
                         (modalSmallHOC({
                             title: i18n._('File Sent Successfully'),
-                            text: i18n._('Please confirm and choose whether to start to print this file on the touchscreen.'),
+                            text: i18n._('Please confirm whether to start this print job on the touchscreen.'),
                             img: IMAGE_WIFI_CONNECTED
                         }));
                     }
@@ -230,11 +237,19 @@ class WifiTransport extends PureComponent {
                     />
                     <button
                         type="button"
-                        className="sm-btn-small sm-btn-primary"
+                        className="sm-btn-large sm-btn-default"
                         onClick={actions.onClickToUpload}
-                        style={{ display: 'block', width: '100%' }}
+                        style={{ display: 'inline-block', width: '49%' }}
                     >
-                        {i18n._('Open G-code File')}
+                        {i18n._('Open G-code')}
+                    </button>
+                    <button
+                        type="button"
+                        className="sm-btn-large sm-btn-default"
+                        onClick={actions.onExport}
+                        style={{ display: 'inline-block', width: '49%', marginLeft: '2%' }}
+                    >
+                        {i18n._('Export G-code')}
                     </button>
                     <div style={{ marginTop: '10px' }}>
                         <input
@@ -250,16 +265,21 @@ class WifiTransport extends PureComponent {
                             : gcodeFile.name;
                         let size = '';
                         const { isRenaming, uploadName } = gcodeFile;
-
-                        if (gcodeFile.size / 1024 / 1024 > 1) {
+                        if (!gcodeFile.size) {
+                            size = '';
+                        } else if (gcodeFile.size / 1024 / 1024 > 1) {
                             size = `${(gcodeFile.size / 1024 / 1024).toFixed(2)} MB`;
                         } else if (gcodeFile.size / 1024 > 1) {
                             size = `${(gcodeFile.size / 1024).toFixed(2)} KB`;
                         } else {
                             size = `${(gcodeFile.size).toFixed(2)} B`;
                         }
-                        const lastModifiedDate = new Date(gcodeFile.lastModifiedDate);
-                        const date = `${lastModifiedDate.getFullYear()}.${lastModifiedDate.getMonth()}.${lastModifiedDate.getDay()}   ${lastModifiedDate.getHours()}:${lastModifiedDate.getMinutes()}`;
+
+                        const lastModified = new Date(gcodeFile.lastModified);
+                        let date = `${lastModified.getFullYear()}.${lastModified.getMonth() + 1}.${lastModified.getDate()}   ${lastModified.getHours()}:${lastModified.getMinutes()}`;
+                        if (!gcodeFile.lastModified) {
+                            date = '';
+                        }
                         const selected = selectFileName === gcodeFile.uploadName;
                         return (
                             <div
@@ -288,6 +308,7 @@ class WifiTransport extends PureComponent {
                                     <div className={styles['gcode-file-img']}>
                                         <img
                                             src={gcodeFile.thumbnail}
+                                            draggable="false"
                                             alt=""
                                         />
                                     </div>
@@ -352,7 +373,7 @@ class WifiTransport extends PureComponent {
                         onClick={actions.sendFile}
                         style={{ display: 'block', width: '100%', marginTop: '10px' }}
                     >
-                        {i18n._('Send to Snapmaker via Wi-Fi')}
+                        {i18n._('Send to Device via Wi-Fi')}
                     </button>
                 </div>
             </div>
@@ -381,6 +402,7 @@ const mapDispatchToProps = (dispatch) => {
         uploadGcodeFile: (fileInfo) => dispatch(workspaceActions.uploadGcodeFile(fileInfo)),
         removeGcodeFile: (fileInfo) => dispatch(workspaceActions.removeGcodeFile(fileInfo)),
         renderGcodeFile: (file) => dispatch(workspaceActions.renderGcodeFile(file, false)),
+        exportFile: (targetFile) => dispatch(projectActions.exportFile(targetFile)),
         uploadGcodeFileToList: (fileInfo) => dispatch(workspaceActions.uploadGcodeFileToList(fileInfo))
     };
 };

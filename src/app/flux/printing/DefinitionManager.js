@@ -19,6 +19,9 @@ class DefinitionManager {
         if (this.series === MACHINE_SERIES.ORIGINAL.value) {
             res = await api.printingConfigs.getDefinition('snapmaker');
             this.snapmakerDefinition = res.body.definition;
+        } else if (this.series === MACHINE_SERIES.CUSTOM.value) {
+            res = await api.printingConfigs.getDefinition('snapmaker');
+            this.snapmakerDefinition = res.body.definition;
         } else {
             res = await api.printingConfigs.getDefinition('snapmaker2');
             this.snapmakerDefinition = res.body.definition;
@@ -58,7 +61,7 @@ class DefinitionManager {
     }
 
     async uploadDefinition(definitionId, tmpPath) {
-        const res = await api.printingConfigs.uploadDefinition(definitionId, tmpPath, this.series);
+        const res = await api.printingConfigs.uploadDefinition(definitionId, tmpPath);
         const { err, definition } = res.body;
         if (err) {
             console.error(err);
@@ -75,7 +78,7 @@ class DefinitionManager {
     }
 
     // Calculate hidden settings
-    calculateDependencies(definition, settings) {
+    calculateDependencies(definition, settings, hasSupportModel) {
         if (settings.infill_sparse_density) {
             const infillLineWidth = definition.settings.infill_line_width.default_value; // 0.4
             const infillSparseDensity = settings.infill_sparse_density.default_value;
@@ -84,6 +87,11 @@ class DefinitionManager {
 
             definition.settings.infill_line_distance.default_value = infillLineDistance;
             settings.infill_line_distance = { default_value: infillLineDistance };
+
+            if (settings.infill_sparse_density.default_value === 100) {
+                settings.top_layers = { default_value: 0 };
+                settings.bottom_layers = { default_value: 999999 };
+            }
         }
 
         if (settings.layer_height) {
@@ -93,6 +101,7 @@ class DefinitionManager {
             const wallThickness = definition.settings.wall_thickness.default_value;
             const wallOutLineWidth = definition.settings.wall_line_width_0.default_value;
             const wallInnerLineWidth = definition.settings.wall_line_width_x.default_value;
+            const infillSparseDensity = definition.settings.infill_sparse_density.default_value;
 
             const wallLineCount = wallThickness !== 0 ? Math.max(1, Math.round((wallThickness - wallOutLineWidth) / wallInnerLineWidth) + 1) : 0;
             definition.settings.wall_line_count.default_value = wallLineCount;
@@ -100,13 +109,13 @@ class DefinitionManager {
 
             // "0 if infill_sparse_density == 100 else math.ceil(round(top_thickness / resolveOrValue('layer_height'), 4))"
             const topThickness = definition.settings.top_thickness.default_value;
-            const topLayers = Math.ceil(topThickness / layerHeight);
+            const topLayers = infillSparseDensity === 100 ? 0 : Math.ceil(Math.round(topThickness / layerHeight));
             definition.settings.top_layers.default_value = topLayers;
             settings.top_layers = { default_value: topLayers };
 
             // "999999 if infill_sparse_density == 100 else math.ceil(round(bottom_thickness / resolveOrValue('layer_height'), 4))"
             const bottomThickness = definition.settings.bottom_thickness.default_value;
-            const bottomLayers = Math.ceil(bottomThickness / layerHeight);
+            const bottomLayers = infillSparseDensity === 100 ? 999999 : Math.ceil(Math.round(bottomThickness / layerHeight));
             definition.settings.bottom_layers.default_value = bottomLayers;
             settings.bottom_layers = { default_value: bottomLayers };
         }
@@ -132,12 +141,24 @@ class DefinitionManager {
                 : supportLineWidth * 100 / supportInfillRate * supportPatternRate;
             definition.settings.support_initial_layer_line_distance.default_value = definition.settings.support_line_distance.default_value;
         }
-        // if (settings.support_z_distance) {
-        //     const supportZDistance = settings.support_z_distance.default_value;
-        //     definition.settings.support_top_distance.default_value = supportZDistance;
-        //     definition.settings.support_bottom_distance.default_value = supportZDistance;
-        // }
+        if (settings.support_pattern) {
+            settings.support_wall_count = settings.support_pattern.default_value === 'grid' ? { default_value: 1 } : { default_value: 0 };
+        }
+        if (settings.support_z_distance) { // copy cura feature
+            const supportZDistance = settings.support_z_distance.default_value;
+            settings.support_top_distance = { default_value: supportZDistance };
+            settings.support_bottom_distance = { default_value: supportZDistance / 2 };
+        }
 
+        // fix CuraEngine z_overide_xy not effected on support_mesh
+        if (hasSupportModel) {
+            if (settings.support_z_distance) {
+                const supportZDistance = settings.support_z_distance.default_value;
+                settings.support_xy_distance = { default_value: supportZDistance };
+            }
+        } else if (definition.settings.support_xy_distance.default_value === definition.settings.support_z_distance.default_value) {
+            settings.support_xy_distance.default_value = 0.875; // reset xy
+        }
         return settings;
     }
 
@@ -155,17 +176,18 @@ class DefinitionManager {
             ownKeys: []
         };
 
-        Object.keys(activeDefinition.settings).forEach(key => {
-            const setting = activeDefinition.settings[key];
+        Object.keys(activeDefinition.settings)
+            .forEach(key => {
+                const setting = activeDefinition.settings[key];
 
-            if (setting.from !== 'fdmprinter') {
-                definition.settings[key] = {
-                    label: setting.label,
-                    default_value: setting.default_value
-                };
-                definition.ownKeys.push(key);
-            }
-        });
+                if (setting.from !== 'fdmprinter') {
+                    definition.settings[key] = {
+                        label: setting.label,
+                        default_value: setting.default_value
+                    };
+                    definition.ownKeys.push(key);
+                }
+            });
 
         definition.ownKeys.push('machine_start_gcode');
         definition.ownKeys.push('machine_end_gcode');
@@ -229,7 +251,6 @@ class DefinitionManager {
         // It is ok even if targetZ is bigger than 125 because firmware has set limitation
         const y = definition.settings.machine_depth.default_value;
         const z = definition.settings.machine_height.default_value;
-        const speedTravel = definition.settings.speed_travel.default_value;
 
         const gcode = [
             ';End GCode begin',
@@ -238,10 +259,9 @@ class DefinitionManager {
             'G90 ;absolute positioning',
             'G92 E0',
             'G1 E-1 F300 ;retract the filament a bit before lifting the nozzle, to release some of the pressure',
-            `G1 Z${z} E-1 F${speedTravel} ;move Z up a bit and retract filament even more`,
+            `G1 Z${z} E-1 F3000 ;move Z up a bit and retract filament even more`,
             `G1 X${0} F3000 ;move X to min endstops, so the head is out of the way`,
             `G1 Y${y} F3000 ;so the head is out of the way and Plate is moved forward`,
-            'M84 ;steppers off',
             ';End GCode end'
         ];
 

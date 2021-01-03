@@ -2,7 +2,7 @@ import _ from 'lodash';
 
 import { PROTOCOL_TEXT, PROTOCOL_SCREEN, MACHINE_SERIES } from '../../constants';
 
-const defaultState = {
+const DEFAULT_STATE = {
     machine: {
         series: MACHINE_SERIES.ORIGINAL.value
     },
@@ -10,38 +10,37 @@ const defaultState = {
         default: {
             widgets: ['visualizer']
         },
-        primary: {
+        left: {
             show: true,
             widgets: [
                 'connection', 'console', 'marlin', 'laser-test-focus'
             ]
         },
-        secondary: {
+        right: {
             show: true,
             widgets: [
-                'wifi-transport', 'control', 'macro', 'gcode'
+                'wifi-transport', 'enclosure', 'control', 'macro', 'gcode'
             ]
         }
     },
     '3dp': {
         default: {
-            widgets: ['3dp-material', '3dp-configurations', '3dp-output']
+            widgets: ['3dp-object-list', '3dp-material', '3dp-configurations', '3dp-output']
         }
     },
     laser: {
         default: {
-            widgets: ['laser-set-background', 'laser-params', 'laser-output']
+            widgets: ['job-type', 'cnc-laser-object-list', 'laser-set-background', 'laser-params', 'laser-output']
         }
     },
     cnc: {
         default: {
-            widgets: ['cnc-tool', 'cnc-path', 'cnc-output']
+            widgets: ['job-type', 'cnc-laser-object-list', 'cnc-tool', 'cnc-path', 'cnc-output']
         }
     },
     developerPanel: {
         primary: {
             widgets: [
-                /*'connectionPanel',*/
                 'axesPanel', 'macroPanel'
             ]
         },
@@ -53,11 +52,14 @@ const defaultState = {
         control: {
             minimized: false,
             headInfoExpanded: true,
-            axes: ['x', 'y', 'z'],
+            axes: ['x', 'y', 'z', 'b'],
             jog: {
                 keypad: false,
                 selectedDistance: '1',
-                customDistance: 10
+                customDistance: 10,
+                selectedAngle: '1',
+                customAngle: 5
+
             },
             shuttle: {
                 feedrateMin: 500,
@@ -93,19 +95,8 @@ const defaultState = {
             autoReconnect: false,
             dataSource: PROTOCOL_TEXT
         },
-        connectionPanel: {
-            minimized: false,
-            controller: {
-                type: 'Marlin' // Grbl|Marlin|Smoothie|TinyG
-            },
-            port: '',
-            baudrate: 115200,
-            autoReconnect: false,
-            dataSource: PROTOCOL_SCREEN
-        },
         gcode: {
-            minimized: false,
-            needRemove: true
+            minimized: false
         },
         macro: {
             minimized: false,
@@ -182,29 +173,35 @@ const defaultState = {
         console: {
             minimized: false,
             fullscreen: false
+        },
+        'laser-output': {
+            autoPreview: true
+        },
+        'cnc-output': {
+            autoPreview: true
         }
     }
 };
-const seriesStates = {
+const SERIES_STATES = {
     original: {},
     A150: {
         laser: {
             default: {
-                widgets: ['laser-params', 'laser-output']
+                widgets: ['job-type', 'cnc-laser-object-list', 'laser-params', 'laser-output']
             }
         }
     },
     A250: {
         laser: {
             default: {
-                widgets: ['laser-params', 'laser-output']
+                widgets: ['job-type', 'cnc-laser-object-list', 'laser-params', 'laser-output']
             }
         }
     },
     A350: {
         laser: {
             default: {
-                widgets: ['laser-params', 'laser-output']
+                widgets: ['job-type', 'cnc-laser-object-list', 'laser-params', 'laser-output']
             }
         }
     }
@@ -228,6 +225,23 @@ function merge(...args) {
     return data;
 }
 
+/**
+ * Check elements in two arrays the same.
+ */
+function arrayEqual(arr1, arr2) {
+    for (const elem of arr1) {
+        if (!_.includes(arr2, elem)) {
+            return false;
+        }
+    }
+    for (const elem of arr2) {
+        if (!_.includes(arr1, elem)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 class WidgetState {
     constructor(store) {
         this.localStore = store;
@@ -236,16 +250,66 @@ class WidgetState {
         this.widgetState = merge(
             {},
             {
-                defaultState,
-                seriesStates
+                defaultState: DEFAULT_STATE,
+                seriesStates: SERIES_STATES
             },
             {
                 defaultState: state.defaultState,
                 seriesStates: state.seriesStates
             }
         );
+
+        // compatibility version
+        this.versionCompatibility(this.widgetState);
+
         this.localStore.setState(this.widgetState);
         this.series = this.widgetState.defaultState.machine.series;
+    }
+
+    /**
+     * Check compatibilities between local states when software upgrades and downgrades.
+     *
+     * @param widgetState
+     */
+    versionCompatibility(widgetState) {
+        // Check workspace
+        const workspace = widgetState.defaultState.workspace;
+        const workspaceAllWidgets = [].concat(workspace.default.widgets)
+            .concat(workspace.left.widgets)
+            .concat(workspace.right.widgets);
+        const defaultAllWidgets = [].concat(DEFAULT_STATE.workspace.default.widgets)
+            .concat(DEFAULT_STATE.workspace.left.widgets)
+            .concat(DEFAULT_STATE.workspace.right.widgets);
+        if (!arrayEqual(workspaceAllWidgets, defaultAllWidgets)) {
+            workspace.default.widgets = DEFAULT_STATE.workspace.default.widgets;
+            workspace.left.widgets = DEFAULT_STATE.workspace.left.widgets;
+            workspace.right.widgets = DEFAULT_STATE.workspace.right.widgets;
+        }
+
+        // Check 3D printing tab
+        if (!arrayEqual(widgetState.defaultState['3dp'].default.widgets, DEFAULT_STATE['3dp'].default.widgets)) {
+            widgetState.defaultState['3dp'].default.widgets = DEFAULT_STATE['3dp'].default.widgets;
+        }
+        // Check Laser tab
+        if (!arrayEqual(widgetState.defaultState.laser.default.widgets, DEFAULT_STATE.laser.default.widgets)) {
+            widgetState.defaultState.laser.default.widgets = DEFAULT_STATE.laser.default.widgets;
+        }
+        // Check CNC tab
+        if (!arrayEqual(widgetState.defaultState.cnc.default.widgets, DEFAULT_STATE.cnc.default.widgets)) {
+            widgetState.defaultState.cnc.default.widgets = DEFAULT_STATE.cnc.default.widgets;
+        }
+
+        // Check series widgets
+        widgetState.seriesStates.original = {};
+        if (!arrayEqual(widgetState.seriesStates.A150.laser.default.widgets, SERIES_STATES.A150.laser.default.widgets)) {
+            widgetState.seriesStates.A150.laser.default.widgets = SERIES_STATES.A150.laser.default.widgets;
+        }
+        if (!arrayEqual(widgetState.seriesStates.A250.laser.default.widgets, SERIES_STATES.A250.laser.default.widgets)) {
+            widgetState.seriesStates.A250.laser.default.widgets = SERIES_STATES.A250.laser.default.widgets;
+        }
+        if (!arrayEqual(widgetState.seriesStates.A350.laser.default.widgets, SERIES_STATES.A350.laser.default.widgets)) {
+            widgetState.seriesStates.A350.laser.default.widgets = SERIES_STATES.A350.laser.default.widgets;
+        }
     }
 
     updateTabContainer(tab, container, value) {
@@ -346,7 +410,7 @@ class WidgetState {
     }
 
     getDefaultState() {
-        return merge({}, defaultState, seriesStates[this.series]);
+        return merge({}, DEFAULT_STATE, SERIES_STATES[this.series]);
     }
 
     getState() {

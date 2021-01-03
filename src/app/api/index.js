@@ -59,9 +59,16 @@ const uploadFile = defaultAPIFactory((formData) => request.post('/api/file').sen
 const uploadCaseFile = defaultAPIFactory((formData) => request.post('/api/file/uploadCaseFile').send(formData));
 const uploadGcodeFile = defaultAPIFactory((formData) => request.post('/api/file/uploadGcodeFile').send(formData));
 const uploadUpdateFile = defaultAPIFactory((formData) => request.post('/api/file/uploadUpdateFile').send(formData));
+const buildFirmwareFile = defaultAPIFactory((formData) => request.post('/api/file/buildFirmwareFile').send(formData));
+const saveEnv = defaultAPIFactory((data) => request.post('/api/file/saveEnv').send(data));
+const getEnv = defaultAPIFactory((data) => request.post('/api/file/getEnv').send(data));
+const recoverEnv = defaultAPIFactory((data) => request.post('/api/file/recoverEnv').send(data));
+const removeEnv = defaultAPIFactory((data) => request.post('/api/file/removeEnv').send(data));
+const packageEnv = defaultAPIFactory((data) => request.post('/api/file/packageEnv').send(data));
+const recoverProjectFile = defaultAPIFactory((data) => request.post('/api/file/recoverProjectFile').send(data));
+
 
 const uploadImage = defaultAPIFactory((formdata) => request.post('/api/image').send(formdata));
-const uploadLaserCaseImage = defaultAPIFactory((formdata) => request.post('/api/image/laserCaseImage').send(formdata));
 
 
 // Stock Remap
@@ -98,6 +105,8 @@ const setCameraCalibrationMatrix = defaultAPIFactory((options) => request.post('
 const convertRasterToSvg = defaultAPIFactory((options) => request.post('/api/svg/convertRasterToSvg', options));
 
 const convertTextToSvg = defaultAPIFactory((options) => request.post('/api/svg/convertTextToSvg', options));
+
+const convertOneLineTextToSvg = defaultAPIFactory((options) => request.post('/api/svg/convertOneLineTextToSvg', options));
 
 //
 // toolpath
@@ -268,6 +277,25 @@ printingConfigs.uploadDefinition = defaultAPIFactory((definitionId, tmpPath, ser
 }));
 
 //
+// cncConfigs
+//
+const cncConfigs = {};
+cncConfigs.getAllDefinitions = defaultAPIFactory(() => request.get('/api/cncToolDefinitions'));
+cncConfigs.getToolListDefinition = defaultAPIFactory((definitionId, name) => request.get(`/api/cncToolListDefinition/${definitionId}`).query({ name }));
+cncConfigs.createToolCategoryDefinition = defaultAPIFactory((activeToolCategory) => request.post('/api/cncToolCategoryDefinition').send({ activeToolCategory }));
+cncConfigs.createToolListDefinition = defaultAPIFactory((activeToolCategory, activeToolList) => request.post('/api/cncToolListDefinition/').send({ activeToolCategory, activeToolList }));
+cncConfigs.removeToolCategoryDefinition = defaultAPIFactory((definitionId) => request.delete('/api/cncToolCategoryDefinition').send({ definitionId }));
+cncConfigs.removeToolListDefinition = defaultAPIFactory((activeToolCategory, activeToolList) => request.delete('/api/cncToolListDefinition').send({
+    activeToolCategory,
+    activeToolList
+}));
+cncConfigs.uploadToolDefinition = defaultAPIFactory((uploadName, toolDefinitions) => request.post('/api/cncToolDefinitions/upload').send({
+    uploadName,
+    toolDefinitions
+}));
+cncConfigs.updateToolDefinition = defaultAPIFactory((activeToolCategory) => request.put('/api/cncToolDefinitions/update').send({ activeToolCategory }));
+cncConfigs.changeActiveToolListDefinition = defaultAPIFactory((definitionId, name) => request.post(`/api/cncToolListDefinition/${definitionId}`).query({ name }));
+//
 // Macros
 //
 const macros = {};
@@ -293,8 +321,14 @@ export default {
     uploadCaseFile,
     uploadGcodeFile,
     uploadUpdateFile,
+    buildFirmwareFile,
+    saveEnv,
+    getEnv,
+    recoverEnv,
+    removeEnv,
+    packageEnv,
+    recoverProjectFile,
     uploadImage,
-    uploadLaserCaseImage,
     stockRemapProcess,
     processImage,
     processTrace,
@@ -305,13 +339,16 @@ export default {
     getCameraCalibration,
     cameraCalibrationPhoto,
     setCameraCalibrationMatrix,
+
     // svg
     convertRasterToSvg,
     convertTextToSvg,
+    convertOneLineTextToSvg,
 
     generateToolPath,
 
     printingConfigs,
+    cncConfigs,
 
     // State
     getState,

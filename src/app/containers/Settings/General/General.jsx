@@ -3,11 +3,14 @@ import get from 'lodash/get';
 import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
 import FacebookLoading from 'react-facebook-loading';
+import { connect } from 'react-redux';
 import settings from '../../../config/settings';
 import i18n from '../../../lib/i18n';
 import Anchor from '../../../components/Anchor';
 import Space from '../../../components/Space';
 import styles from './index.styl';
+import UniApi from '../../../lib/uni-api';
+import { actions as machineActions } from '../../../flux/machine';
 
 const About = () => {
     return (
@@ -43,6 +46,10 @@ class General extends PureComponent {
     static propTypes = {
         state: PropTypes.object,
         stateChanged: PropTypes.bool,
+        shouldCheckForUpdate: PropTypes.bool,
+        isDownloading: PropTypes.bool,
+        autoupdateMessage: PropTypes.string,
+        updateShouldCheckForUpdate: PropTypes.func.isRequired,
         actions: PropTypes.object
     };
 
@@ -62,13 +69,23 @@ class General extends PureComponent {
         }
     };
 
+    actions = {
+        handleCheckForUpdate: () => {
+            if (this.props.isDownloading) {
+                UniApi.Update.downloadHasStarted();
+            } else {
+                UniApi.Update.checkForUpdate();
+            }
+        }
+    }
+
     componentDidMount() {
         const { actions } = this.props;
         actions.load();
     }
 
     render() {
-        const { state, stateChanged } = this.props;
+        const { state, stateChanged, shouldCheckForUpdate, autoupdateMessage } = this.props;
         const lang = get(state, 'lang', 'en');
 
         if (state.api.loading) {
@@ -106,10 +123,39 @@ class General extends PureComponent {
                                 <option value="it">Italiano</option>
                                 <option value="nl">Nederlands</option>
                                 <option value="ru">Русский</option>
+                                <option value="uk">Українська</option>
                                 <option value="ko">한국어</option>
                                 <option value="ja">日本語</option>
                                 <option value="zh-cn">中文 (简体)</option>
                             </select>
+                            <div className={styles['autoupdate-wrapper']}>
+                                <p className={styles['update-title']}>{i18n._('Software Update')}</p>
+                                <button
+                                    className={classNames(
+                                        'btn',
+                                        'btn-outline-secondary',
+                                        styles['autoupdate-button'],
+                                    )}
+                                    type="button"
+                                    onClick={this.actions.handleCheckForUpdate}
+                                >
+                                    {i18n._('Check for update')}
+                                </button>
+                                <div className={styles['autoupdate-auto']}>
+                                    <input
+                                        type="checkbox"
+                                        className={styles['autoupdate-checkbox']}
+                                        checked={shouldCheckForUpdate}
+                                        onChange={(event) => { this.props.updateShouldCheckForUpdate(event.target.checked); }}
+                                    />
+                                    <span className={styles['autoupdate-text']}>
+                                        {i18n._('Automatically check for update')}
+                                    </span>
+                                </div>
+                                <div className={styles['autoupdate-message']}>
+                                    {autoupdateMessage}
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div className={styles['form-actions']}>
@@ -143,5 +189,19 @@ class General extends PureComponent {
         );
     }
 }
+const mapStateToProps = (state) => {
+    const machine = state.machine;
 
-export default General;
+    const { shouldCheckForUpdate, isDownloading, autoupdateMessage } = machine;
+
+    return {
+        shouldCheckForUpdate,
+        autoupdateMessage,
+        isDownloading
+    };
+};
+
+const mapDispatchToProps = (dispatch) => ({
+    updateShouldCheckForUpdate: (shouldAutoUpdate) => dispatch(machineActions.updateShouldCheckForUpdate(shouldAutoUpdate))
+});
+export default connect(mapStateToProps, mapDispatchToProps)(General);

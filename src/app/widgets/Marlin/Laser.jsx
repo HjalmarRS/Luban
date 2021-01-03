@@ -23,7 +23,8 @@ class Printing extends PureComponent {
         size: PropTypes.object,
 
         executeGcode: PropTypes.func.isRequired,
-        updateState: PropTypes.func.isRequired
+        updateIsLaserPrintAutoMode: PropTypes.func.isRequired,
+        updateMaterialThickness: PropTypes.func.isRequired
     };
 
 
@@ -79,14 +80,10 @@ class Printing extends PureComponent {
             }
         },
         onChangeLaserPrintMode: () => {
-            this.props.updateState({
-                isLaserPrintAutoMode: !this.props.isLaserPrintAutoMode
-            });
+            this.props.updateIsLaserPrintAutoMode(!this.props.isLaserPrintAutoMode);
         },
         onChangeMaterialThickness: (value) => {
-            this.props.updateState({
-                materialThickness: value
-            });
+            this.props.updateMaterialThickness(value);
         }
     };
 
@@ -168,17 +165,17 @@ class Printing extends PureComponent {
                             <span className="sm-parameter-row__label-lg">{i18n._('Laser Power')}</span>
                             <button
                                 type="button"
-                                className={!laserPowerOpen ? 'sm-btn-small sm-btn-primary' : 'sm-btn-small sm-btn-danger'}
+                                className={laserPowerOpen ? 'sm-btn-small sm-btn-primary' : 'sm-btn-small sm-btn-danger'}
                                 style={{
                                     float: 'right'
                                 }}
                                 onClick={this.actions.onClickLaserPower}
                                 disabled={isWifiPrinting}
                             >
-                                {laserPowerOpen && <i className="fa fa-toggle-off" />}
-                                {!laserPowerOpen && <i className="fa fa-toggle-on" />}
+                                {!laserPowerOpen && <i className="fa fa-toggle-off" />}
+                                {laserPowerOpen && <i className="fa fa-toggle-on" />}
                                 <span className="space" />
-                                {!laserPowerOpen ? i18n._('Open') : i18n._('Close')}
+                                {laserPowerOpen ? i18n._('On') : i18n._('Off')}
                             </button>
                         </div>
                         <div className="sm-parameter-row">
@@ -231,7 +228,8 @@ const mapStateToProps = (state) => {
 const mapDispatchToProps = (dispatch) => {
     return {
         executeGcode: (gcode, context) => dispatch(machineActions.executeGcode(gcode, context)),
-        updateState: (state) => dispatch(machineActions.updateState(state))
+        updateIsLaserPrintAutoMode: (isLaserPrintAutoMode) => dispatch(machineActions.updateIsLaserPrintAutoMode(isLaserPrintAutoMode)),
+        updateMaterialThickness: (materialThickness) => dispatch(machineActions.updateMaterialThickness(materialThickness))
     };
 };
 

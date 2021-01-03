@@ -8,7 +8,7 @@ import modal from '../../lib/modal';
 import LaserVisualizer from '../../widgets/LaserVisualizer';
 import Widget from '../../widgets/Widget';
 import Dropzone from '../../components/Dropzone';
-import { actions as cncLaserActions } from '../../flux/cncLaserShared';
+import { actions as editorActions } from '../../flux/editor';
 import { actions as widgetActions } from '../../flux/widget';
 import styles from './styles.styl';
 
@@ -35,8 +35,8 @@ class Laser extends Component {
             }
             this.props.uploadImage(file, mode, () => {
                 modal({
-                    title: i18n._('Parse Image Error'),
-                    body: i18n._('Failed to parse image file {{filename}}', { filename: file.name })
+                    title: i18n._('Parse Error'),
+                    body: i18n._('Failed to parse image file {{filename}}.', { filename: file.name })
                 });
             });
         },
@@ -66,50 +66,50 @@ class Laser extends Component {
 
         return (
             <div style={style}>
-                <Dropzone
-                    disabled={state.isDraggingWidget}
-                    accept={ACCEPT}
-                    dragEnterMsg={i18n._('Drop an image file here.')}
-                    onDropAccepted={this.actions.onDropAccepted}
-                    onDropRejected={this.actions.onDropRejected}
-                >
-                    <div className={styles['laser-table']}>
-                        <div className={styles['laser-table-row']}>
+                <div className={styles['laser-table']}>
+                    <div className={styles['laser-table-row']}>
+                        <Dropzone
+                            disabled={state.isDraggingWidget}
+                            accept={ACCEPT}
+                            dragEnterMsg={i18n._('Drop an image file here.')}
+                            onDropAccepted={this.actions.onDropAccepted}
+                            onDropRejected={this.actions.onDropRejected}
+                        >
                             <div className={styles['view-space']}>
                                 <LaserVisualizer
                                     widgetId="laserVisualizer"
                                 />
                             </div>
-                            <form className={styles['control-bar']} noValidate>
-                                <Sortable
-                                    options={{
-                                        animation: 150,
-                                        delay: 0,
-                                        group: {
-                                            name: 'laser-control'
-                                        },
-                                        handle: '.sortable-handle',
-                                        filter: '.sortable-filter',
-                                        chosenClass: 'sortable-chosen',
-                                        ghostClass: 'sortable-ghost',
-                                        dataIdAttr: 'data-widget-id',
-                                        onStart: this.actions.onDragWidgetStart,
-                                        onEnd: this.actions.onDragWidgetEnd
-                                    }}
-                                    onChange={this.onChangeWidgetOrder}
-                                >
-                                    {widgets.map(widget => {
-                                        return (
-                                            <div data-widget-id={widget} key={widget}>
-                                                <Widget widgetId={widget} />
-                                            </div>
-                                        );
-                                    })}
-                                </Sortable>
-                            </form>
-                        </div>
+                        </Dropzone>
+                        <form className={styles['control-bar']} noValidate>
+                            <Sortable
+                                options={{
+                                    animation: 150,
+                                    delay: 0,
+                                    group: {
+                                        name: 'laser-control'
+                                    },
+                                    handle: '.sortable-handle',
+                                    filter: '.sortable-filter',
+                                    chosenClass: 'sortable-chosen',
+                                    ghostClass: 'sortable-ghost',
+                                    dataIdAttr: 'data-widget-id',
+                                    onStart: this.actions.onDragWidgetStart,
+                                    onEnd: this.actions.onDragWidgetEnd
+                                }}
+                                onChange={this.onChangeWidgetOrder}
+                            >
+                                {widgets.map(widget => {
+                                    return (
+                                        <div data-widget-id={widget} key={widget}>
+                                            <Widget widgetId={widget} headType="laser" />
+                                        </div>
+                                    );
+                                })}
+                            </Sortable>
+                        </form>
                     </div>
-                </Dropzone>
+                </div>
             </div>
         );
     }
@@ -124,7 +124,7 @@ const mapStateToProps = (state) => {
 
 const mapDispatchToProps = (dispatch) => {
     return {
-        uploadImage: (file, mode, onFailure) => dispatch(cncLaserActions.uploadImage('laser', file, mode, onFailure)),
+        uploadImage: (file, mode, onFailure) => dispatch(editorActions.uploadImage('laser', file, mode, onFailure)),
         updateTabContainer: (widgets) => dispatch(widgetActions.updateTabContainer('laser', 'default', widgets))
     };
 };

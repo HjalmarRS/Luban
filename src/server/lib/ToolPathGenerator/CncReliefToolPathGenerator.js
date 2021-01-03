@@ -2,61 +2,155 @@ import Jimp from 'jimp';
 import EventEmitter from 'events';
 // import GcodeParser from './GcodeParser';
 import Normalizer from './Normalizer';
+import { round } from '../../../shared/lib/utils';
+import { CNC_IMAGE_NEGATIVE_RANGE_FIELD } from '../../constants';
+import XToBToolPath from '../ToolPath/XToBToolPath';
+
+const OVERLAP_RATE = 0.5;
+const MAX_DENSITY = 20;
+
+class ZState {
+    constructor() {
+        this.init();
+    }
+
+    update(state) {
+        this.isUpdate = true;
+        state.x !== undefined && (this.x = state.x);
+        state.y !== undefined && (this.y = state.y);
+        state.z !== undefined && (this.z = state.z);
+        state.f !== undefined && (this.f = state.f);
+        if (state.z !== undefined) {
+            this.z = state.z;
+            if (this.maxZ !== null) {
+                this.maxZ = Math.max(this.maxZ, state.z);
+            } else {
+                this.maxZ = state.z;
+            }
+        }
+    }
+
+    move(toolPath) {
+        if (this.isUpdate) {
+            const lastCommand = toolPath.getLastCommand();
+            if (lastCommand.G !== 0 || lastCommand.Z < this.maxZ) {
+                toolPath.move0Z(this.maxZ, this.f);
+            }
+            if (this.x !== null && this.y !== null) {
+                toolPath.move0XY(this.x, this.y, this.f);
+            } else if (this.x !== null) {
+                toolPath.move0X(this.x, this.f);
+            } else if (this.y !== null) {
+                toolPath.move0Y(this.y, this.f);
+            }
+            toolPath.move0Z(this.z, this.f);
+
+            this.init();
+        }
+    }
+
+    init() {
+        this.isUpdate = false;
+        this.x = null;
+        this.y = null;
+        this.z = null;
+        this.maxZ = null;
+        this.f = null;
+    }
+}
 
 export default class CncReliefToolPathGenerator extends EventEmitter {
     constructor(modelInfo, modelPath) {
         super();
-        // const { config, transformation, gcodeConfigPlaceholder } = modelInfo;
-        const { config, transformation, gcodeConfig } = modelInfo;
-        const { jogSpeed, workSpeed, plungeSpeed } = gcodeConfig;
-        // todo: toolDiameter, toolAngle
-        const { toolAngle, targetDepth, stepDown, safetyHeight, stopHeight, isInvert, density } = config;
+
+        const { config, transformation, gcodeConfig, materials, toolParams } = modelInfo;
+        const { targetDepth, stepDown, density, isModel = false } = gcodeConfig;
+        const { isRotate, diameter } = materials;
+        const { toolDiameter, toolAngle } = toolParams;
+
+        const { invert } = config;
+
+        const radius = diameter / 2;
 
         this.modelInfo = modelInfo;
-        this.jogSpeed = jogSpeed;
-        this.workSpeed = workSpeed;
-        this.plungeSpeed = plungeSpeed;
+        this.modelPath = modelPath;
+
+        this.gcodeConfig = gcodeConfig;
+        this.transformation = transformation;
+
+        this.isRotate = isRotate;
+        this.diameter = diameter;
+
+        this.isRotateModel = isRotate && isModel;
 
         this.targetDepth = targetDepth;
+
+        this.initialZ = isRotate ? radius : 0;
+
+        this.imageInitalZ = this.initialZ;
+        this.imageFinalZ = this.initialZ - this.targetDepth;
+
+        if (this.isRotateModel) {
+            this.modelDiameter = transformation.width / Math.PI;
+            this.targetDepth = radius;
+            this.imageInitalZ = this.modelDiameter / 2;
+            this.imageFinalZ = 0;
+        }
+
         this.stepDown = stepDown;
-        this.safetyHeight = safetyHeight;
-        this.stopHeight = stopHeight;
 
-        const maxDensity = Math.min(10, Math.floor(Math.sqrt(5000000 / transformation.width / transformation.height)));
-        this.density = Math.min(density, maxDensity);
+        this.density = Math.min(density, this.calMaxDensity(toolDiameter, transformation));
 
-        this.targetWidth = Math.round(transformation.width * this.density);
-        this.targetHeight = Math.round(transformation.height * this.density);
+        this.toolAngle = toolAngle;
+
         this.rotationZ = transformation.rotationZ;
         this.flip = transformation.flip;
-        this.isInvert = isInvert;
+        this.invert = invert;
 
-        this.modelPath = modelPath;
-        this.toolSlope = Math.tan(toolAngle / 2 * Math.PI / 180);
-        this.toolPath = [];
-        this.estimatedTime = 0;
+        this.toolPath = new XToBToolPath({ isRotate: this.isRotate, diameter: this.isRotateModel ? this.modelDiameter : this.diameter });
+
+        const targetWidth = Math.round(transformation.width * this.density);
+        const targetHeight = Math.round(transformation.height * this.density);
+
+        this._initGenerator(targetWidth, targetHeight);
     }
 
-    generateToolPathObj() {
+    _initGenerator(targetWidth, targetHeight) {
+        this.targetWidth = targetWidth;
+        this.targetHeight = targetHeight;
+
+        this.normalizer = new Normalizer(
+            'Center',
+            0,
+            this.targetWidth - 1,
+            0,
+            this.targetHeight - 1,
+            { x: 1 / this.density, y: 1 / this.density },
+            { x: 0, y: 0 }
+        );
+    }
+
+    _processImage() {
         let data = null;
         return Jimp
             .read(this.modelPath)
-            .then(img => {
-                if (this.isInvert) {
+            .then(async img => {
+                if (this.invert) {
                     img.invert();
                 }
 
-                const { width, height } = img.bitmap;
-
                 img
                     .greyscale()
+                    .resize(this.targetWidth, this.targetHeight)
                     .flip((this.flip & 2) > 0, (this.flip & 1) > 0)
-                    .rotate(-this.rotationZ * 180 / Math.PI)
-                    .background(0xffffffff);
+                    .rotate(-this.rotationZ * 180 / Math.PI);
+
 
                 // targetWidth&targetHeight will be changed after rotated
-                this.targetWidth = Math.round(this.targetWidth * img.bitmap.width / width);
-                this.targetHeight = Math.round(this.targetHeight * img.bitmap.height / height);
+                const targetWidth = img.bitmap.width;
+                const targetHeight = img.bitmap.height;
+
+                this._initGenerator(targetWidth, targetHeight);
 
                 data = [];
                 for (let i = 0; i < this.targetWidth; i++) {
@@ -65,327 +159,394 @@ export default class CncReliefToolPathGenerator extends EventEmitter {
                         const x = Math.floor(i / this.targetWidth * img.bitmap.width);
                         const y = Math.floor(j / this.targetHeight * img.bitmap.height);
                         const idx = y * img.bitmap.width * 4 + x * 4;
-                        data[i][j] = img.bitmap.data[idx];
+                        const a = img.bitmap.data[idx + 3];
+                        if (a === CNC_IMAGE_NEGATIVE_RANGE_FIELD) {
+                            data[i][j] = -img.bitmap.data[idx];
+                        } else if (a === 0) {
+                            data[i][j] = 255;
+                        } else {
+                            data[i][j] = img.bitmap.data[idx];
+                        }
                     }
                 }
 
-                let smooth = false;
-                while (!smooth) {
-                    smooth = !this.upSmooth(data);
-                }
-                // const fakeGcode = this.genGCode(data);
-                // return new GcodeParser().parseGcodeToToolPathObj(fakeGcode, this.modelInfo);
-                return this.parseImageToToolPathObj(data);
+                this.upSmooth(data);
+                return data;
             });
     }
 
-    calc(grey) {
-        // return (color / 255 * this.targetDepth - 1 / this.density / this.toolSlope) * 255 / this.targetDepth;
-        return grey - 255 / (this.targetDepth * this.density * this.toolSlope);
+    /**
+     * Calculate the max density
+     */
+    calMaxDensity(toolDiameter, transformation) {
+        const maxDensity1 = Math.floor(Math.sqrt(5000000 / transformation.width / transformation.height));
+        const lineWidth = toolDiameter * OVERLAP_RATE;
+        const maxDensity2 = 1 / lineWidth;
+        return Math.min(MAX_DENSITY, maxDensity1, maxDensity2);
     }
 
+    calc(grey, depthOffsetRatio) {
+        return grey - 255 / depthOffsetRatio;
+    }
+
+    // TODO: Note that with white to be cut, this function is actually downSmooth
     upSmooth = (data) => {
         const width = data.length;
         const height = data[0].length;
-        const depthOffsetRatio = this.targetDepth * this.density * this.toolSlope;
-        let updated = false;
+        const depth = this.imageInitalZ - this.imageFinalZ;
+        const depthOffsetRatio = depth * this.density * Math.tan(this.toolAngle / 2 * Math.PI / 180);
+        let updated = true;
         const dx = [-1, -1, -1, 0, 0, 1, 1, 1];
         const dy = [-1, 0, 1, -1, 1, -1, 0, 1];
-        for (let i = 0; i < width; i++) {
-            for (let j = 0; j < height; j++) {
-                let allowedDepth = 0;
-                if (depthOffsetRatio < 255) {
-                    for (let k = 0; k < 8; k++) {
-                        const i2 = i + dx[k];
-                        const j2 = j + dy[k];
-                        if (i2 < 0 || i2 > width - 1 || j2 < 0 || j2 > height - 1) {
-                            continue;
+        while (updated) {
+            updated = false;
+            for (let i = 0; i < width; i++) {
+                for (let j = 0; j < height; j++) {
+                    let allowedDepth = -255;
+                    if (depthOffsetRatio < 255) {
+                        for (let k = 0; k < 8; k++) {
+                            const i2 = i + dx[k];
+                            const j2 = j + dy[k];
+                            if (i2 < 0 || i2 > width - 1 || j2 < 0 || j2 > height - 1) {
+                                continue;
+                            }
+                            allowedDepth = Math.max(allowedDepth, data[i2][j2]);
                         }
-                        allowedDepth = Math.max(allowedDepth, data[i2][j2]);
+                        allowedDepth = this.calc(allowedDepth, depthOffsetRatio);
                     }
-                    allowedDepth = this.calc(allowedDepth);
-                }
-                if (data[i][j] < allowedDepth) {
-                    data[i][j] = allowedDepth;
-                    updated = true;
+                    if (data[i][j] < allowedDepth) {
+                        data[i][j] = allowedDepth;
+                        updated = true;
+                    }
                 }
             }
         }
-        return updated;
     };
 
-    genGCode = (data) => {
-        let cutDown = true;
-        // let curDepth = -this.stepDown;
-        let curDepth = 0;
-        // let gcode = [];
-        let gcode = '';
-        let currentZ = 0;
-        const normalizer = new Normalizer(
-            'Center',
-            0,
-            this.targetWidth,
-            0,
-            this.targetHeight,
-            { x: 1 / this.density, y: 1 / this.density }
-        );
-        const normalizedX0 = normalizer.x(0);
-        const normalizedHeight = normalizer.y(this.targetHeight);
+    _calculateThePrintZ(pixel) {
+        const z = round(this.imageInitalZ - (this.imageInitalZ - this.imageFinalZ) * (255 - pixel) / 255, 2);
+        return Math.min(this.initialZ, z);
+    }
 
-        // gcode.push('M3');
-        // gcode.push(`G0 X${normalizedX0} Y${normalizedHeight} Z${this.safetyHeight}`);
-        gcode += 'M3\n';
-        gcode += `G0 X${normalizedX0} Y${normalizedHeight} Z${this.safetyHeight}\n`;
-        let progress = 0;
-        let cutDownTimes = 0;
-        const zSteps = Math.ceil(this.targetDepth / this.stepDown) + 1;
+    parseRotateImageToViewPathObj = (data) => {
+        const normalizer = this.normalizer;
 
-        while (cutDown) {
-            cutDown = false;
-            for (let i = 0; i < this.targetWidth; ++i) {
-                // const matX = i;
-                const gX = normalizer.x(i);
-                for (let j = 0; j < this.targetHeight; ++j) {
-                    const matY = (this.targetHeight - j);
-                    const gY = normalizer.y(matY);
-                    let z = Number((-data[i][j] * this.targetDepth / 255).toFixed(2));
-                    if (z > currentZ) {
-                        gcode += `G0 Z${z} F${this.workSpeed}\n`;
-                        currentZ = z;
-                        // if (z < curDepth + this.stepDown) {
-                        if (z < curDepth) {
-                            gcode += `G1 X${gX} Y${gY} F${this.workSpeed}\n`;
-                            cutDown = true;
-                        } else {
-                            gcode += `G0 X${gX} Y${gY} F${this.workSpeed}\n`;
-                        }
-                    } else {
-                        // if (z < curDepth + this.stepDown) {
-                        if (z < curDepth) {
-                            // z = Math.max(curDepth, z);
-                            z = Math.max(curDepth - this.stepDown, z);
-                            currentZ = z;
-                            gcode += `G1 X${gX} Y${gY} Z${z} F${this.plungeSpeed}\n`;
-                            // console.log(`X${x} Y${y} Z${z} curDepth: ${curDepth}`);
-                            cutDown = true;
-                        } else {
-                            gcode += `G0 X${gX} Y${gY} F${this.workSpeed}\n`;
-                        }
-                    }
-                }
-                // really need?
-                gcode += `G0 Z${this.safetyHeight} F${this.jogSpeed}\n`; // back to safety distance.
-                gcode += `G0 X${gX} Y${normalizedHeight} F${this.jogSpeed}\n`;
-                currentZ = this.safetyHeight;
-                const p = i / (this.targetWidth - 1) / zSteps + cutDownTimes / zSteps;
-                if (p - progress > 0.05) {
-                    progress = p;
-                    this.emit('progress', progress);
+        const paths = [];
+
+        const pathLength = this.isRotateModel ? this.targetWidth : Math.round(this.diameter * Math.PI * this.density);
+
+        const swapPath = (path, start, end) => {
+            const pathTmp = [];
+            for (let i = start; i <= end; i++) {
+                pathTmp.push(path[i % path.length]);
+            }
+            let index = 0;
+            for (let i = end; i >= start; i--) {
+                path[i % path.length] = pathTmp[index++];
+            }
+        };
+
+        const pathNegativeReordering = (path) => {
+            let start = 0;
+            const len = path.length;
+            for (let i = 0; i < len; i++) {
+                if (path[i].z > 0) {
+                    start = i;
+                    break;
                 }
             }
-            gcode += `G0 Z${this.safetyHeight} F${this.jogSpeed}\n`; // back to safety distance.
-            gcode += `G0 X${normalizedX0} Y${normalizedHeight} F${this.jogSpeed}\n`;
-            currentZ = this.safetyHeight;
-            curDepth -= this.stepDown;
-            cutDownTimes += 1;
+            let left = null;
+            let right = null;
+            for (let i = start; i <= start + len; i++) {
+                if (path[i % len].z < 0) {
+                    if (left === null) {
+                        left = i;
+                    }
+                } else {
+                    if (left !== null) {
+                        right = i - 1;
+                        swapPath(path, left, right);
+                        left = null;
+                        right = null;
+                    }
+                }
+            }
+        };
+
+        for (let j = 0; j < this.targetHeight; j++) {
+            const path = [];
+            for (let i = 0; i < Math.max(this.targetWidth, pathLength); i++) {
+                const index = i % pathLength;
+                const x = normalizer.x(i);
+                const z = round(i >= this.targetWidth ? this.diameter / 2 : this._calculateThePrintZ(data[i][j]), 2);
+                const b = this.toolPath.toB(x) / 180 * Math.PI;
+                const px = round(z * Math.sin(b), 2);
+                const py = round(z * Math.cos(b), 2);
+                if (path[index] === undefined) {
+                    path[index] = { x: px, y: py, z: z };
+                } else {
+                    if (z < path[index].z) {
+                        path[index].x = px;
+                        path[index].x = px;
+                        path[index].z = z;
+                    }
+                }
+            }
+            path.push(path[0]);
+
+            pathNegativeReordering(path);
+
+            paths.push(path);
+
+            this.emit('progress', (j + 1) / this.targetHeight);
         }
-        gcode += `G0 Z${this.stopHeight} F${this.jogSpeed}\n`;
-        gcode += 'M5\n';
-        // return gcode.join('\n');
-        return gcode;
-    };
 
-    parseImageToToolPathObj = (data) => {
-        let cutDown = true;
-        let curDepth = -this.stepDown;
-        // let gcode = '';
-        let currentZ = 0;
-        let progress = 0;
-        let cutDownTimes = 0;
-        const { headerType, mode, transformation, config } = this.modelInfo;
-        const { positionX, positionY, positionZ } = transformation;
-        const normalizer = new Normalizer(
-            'Center',
-            0,
-            this.targetWidth,
-            0,
-            this.targetHeight,
-            { x: 1 / this.density, y: 1 / this.density }
-        );
-        let startPoint = {
-            X: undefined,
-            Y: undefined,
-            Z: undefined
-        };
-        let endPoint = {
-            X: undefined,
-            Y: undefined,
-            Z: undefined
-        };
-        const normalizedX0 = normalizer.x(0);
-        const normalizedHeight = normalizer.y(this.targetHeight);
-        const zSteps = Math.ceil(this.targetDepth / this.stepDown) + 1;
+        paths.push(paths[paths.length - 1]);
 
-        // gcode.push('M3');
-        // gcode.push(`G0 X${normalizedX0} Y${normalizedHeight} Z${this.safetyHeight}`);
-        this.toolPath.push({ G: 0, Z: this.stopHeight, F: 120 });
-        this.toolPath.push({ G: 0, X: normalizedX0, Y: normalizedHeight, F: 120 });
-        this.toolPath.push({ G: 0, Z: this.safetyHeight, F: 120 });
-        this.toolPath.push({ M: 3 });
-        startPoint = { X: normalizedX0, Y: normalizedHeight, Z: this.safetyHeight };
-        // endPoint.X !== undefined && (startPoint.X = endPoint.X);
-        // endPoint.Y !== undefined && (startPoint.Y = endPoint.Y);
-        // endPoint.Z !== undefined && (startPoint.Z = endPoint.Z);
+        const width = this.targetWidth / this.density;
+        const height = this.targetHeight / this.density;
 
         const boundingBox = {
+            max: {
+                x: this.transformation.positionX + width / 2,
+                y: this.transformation.positionY + height / 2,
+                z: -this.targetDepth
+            },
             min: {
-                x: null,
-                y: null,
+                x: this.transformation.positionX - width / 2,
+                y: this.transformation.positionY - height / 2,
                 z: 0
             },
-            max: {
-                x: null,
-                y: null,
-                z: 0
+            length: {
+                x: width,
+                y: height,
+                z: this.targetDepth
             }
         };
 
-        while (cutDown) {
-            cutDown = false;
-            for (let i = 0; i < this.targetWidth; ++i) {
-                const gX = normalizer.x(i);
-                for (let j = 0; j < this.targetHeight; ++j) {
-                    const matY = (this.targetHeight - j);
-                    const gY = normalizer.y(matY);
-                    // let z = -data[i][j] * this.targetDepth / 255;
-                    let z = Number((-data[i][j] * this.targetDepth / 255).toFixed(2));
-                    if (z > currentZ) {
-                        // gcode += `G0 Z${z} F${this.workSpeed}\n`;
-                        this.toolPath.push({ G: 0, Z: z, F: this.workSpeed });
-                        currentZ = z;
-                        if (z < curDepth) {
-                            // gcode += `G1 X${gX} Y${gY} F${this.workSpeed}\n`;
-                            this.toolPath.push({ G: 1, X: gX, Y: gY, F: this.workSpeed });
-                            endPoint = { X: gX, Y: gY, Z: z };
-                            this.estimatedTime += this.getLineLength3D(startPoint, endPoint) * 60.0 / this.workSpeed;
-                            startPoint = { ...endPoint };
-                            cutDown = true;
-                            this.setBoundingBox(boundingBox, { X: gX, Y: gY });
-                        } else {
-                            // gcode += `G0 X${gX} Y${gY} F${this.workSpeed}\n`;
-                            this.toolPath.push({ G: 0, X: gX, Y: gY, F: this.workSpeed });
-                            endPoint = { X: gX, Y: gY, Z: z };
-                            this.estimatedTime += this.getLineLength3D(startPoint, endPoint) * 60.0 / this.workSpeed;
-                            startPoint = { ...endPoint };
-                        }
-                    } else {
-                        if (z < curDepth + this.stepDown) {
-                            z = Math.max(curDepth, z);
-                            currentZ = z;
-                            // gcode += `G1 X${gX} Y${gY} Z${z} F${this.plungeSpeed}\n`;
-                            this.toolPath.push({ G: 1, X: gX, Y: gY, Z: z, F: this.plungeSpeed });
-                            endPoint = { X: gX, Y: gY, Z: z };
-                            this.estimatedTime += this.getLineLength3D(startPoint, endPoint) * 60.0 / this.plungeSpeed;
-                            startPoint = { ...endPoint };
-                            cutDown = true;
-                            this.setBoundingBox(boundingBox, { X: gX, Y: gY });
-                        } else {
-                            // gcode += `G0 X${gX} Y${gY} F${this.workSpeed}\n`;
-                            this.toolPath.push({ G: 0, X: gX, Y: gY, Z: z, F: this.workSpeed });
-                            endPoint = { X: gX, Y: gY, Z: z };
-                            this.estimatedTime += this.getLineLength3D(startPoint, endPoint) * 60.0 / this.workSpeed;
-                            startPoint = { ...endPoint };
-                        }
-                    }
-                }
-                // gcode += `G0 Z${this.safetyHeight} F${this.jogSpeed}\n`; // back to safety distance.
-                // gcode += `G0 X${gX} Y${normalizedHeight} F${this.jogSpeed}\n`;
-                this.toolPath.push({ G: 0, Z: this.safetyHeight, F: this.jogSpeed });
-                this.toolPath.push({ G: 0, X: gX, Y: normalizedHeight, F: this.jogSpeed });
-                endPoint = { X: gX, Y: normalizedHeight, Z: this.safetyHeight };
-                this.estimatedTime += this.getLineLength3D(startPoint, endPoint) * 60.0 / this.jogSpeed;
-                startPoint = { ...endPoint };
-                currentZ = this.safetyHeight;
-                const p = i / (this.targetWidth - 1) / zSteps + cutDownTimes / zSteps;
-                if (p - progress > 0.05) {
-                    progress = p;
-                    this.emit('progress', progress);
-                }
-            }
-            // gcode += `G0 Z${this.safetyHeight} F${this.jogSpeed}\n`; // back to safety distance.
-            // gcode += `G0 X${normalizedX0} Y${normalizedHeight} F${this.jogSpeed}\n`;
-            this.toolPath.push({ G: 0, Z: this.safetyHeight, F: this.jogSpeed });
-            this.toolPath.push({ G: 0, X: normalizedX0, Y: normalizedHeight, F: this.jogSpeed });
-            endPoint = { X: normalizedX0, Y: normalizedHeight, Z: this.safetyHeight };
-            this.estimatedTime += this.getLineLength3D(startPoint, endPoint) * 60.0 / this.jogSpeed;
-            startPoint = { ...endPoint };
-            currentZ = this.safetyHeight;
-            curDepth -= this.stepDown;
-            cutDownTimes += 1;
-        }
-        // gcode += `G0 Z${this.stopHeight} F${this.jogSpeed}\n`;
-        // gcode += 'M5\n';
-        this.toolPath.push({ G: 0, Z: this.stopHeight, F: this.jogSpeed });
-        this.toolPath.push({ M: 5 });
-        endPoint = { X: normalizedX0, Y: normalizedHeight, Z: this.stopHeight };
-        this.estimatedTime += this.getLineLength3D(startPoint, endPoint) * 60.0 / this.jogSpeed;
-        startPoint = { ...endPoint };
+        return {
+            data: paths,
+            positionX: 0,
+            positionY: this.transformation.positionY,
+            rotationB: this.isRotate ? this.toolPath.toB(this.transformation.positionX) : 0,
+            width: width,
+            height: height,
+            boundingBox: boundingBox,
+            isRotate: this.isRotate,
+            diameter: this.diameter
+        };
+    };
 
-        boundingBox.max.x += positionX;
-        boundingBox.min.x += positionX;
-        boundingBox.max.y += positionY;
-        boundingBox.min.y += positionY;
+    parseImageToViewPathObj = (data) => {
+        const { positionX, positionY } = this.transformation;
+
+        const normalizer = this.normalizer;
+
+        const paths = [];
+
+        for (let j = 0; j < this.targetHeight; j++) {
+            const path = [];
+            for (let i = 0; i < this.targetWidth; i++) {
+                const x = normalizer.x(i);
+                const z = this._calculateThePrintZ(data[i][j]);
+                path.push({ x: x, y: z });
+            }
+            paths.push(path);
+
+            this.emit('progress', (j + 1) / this.targetHeight);
+        }
+
+        const width = this.targetWidth / this.density;
+        const height = this.targetHeight / this.density;
+
+        const boundingBox = {
+            max: {
+                x: this.transformation.positionX + width / 2,
+                y: this.transformation.positionY + height / 2,
+                z: -this.targetDepth
+            },
+            min: {
+                x: this.transformation.positionX - width / 2,
+                y: this.transformation.positionY - height / 2,
+                z: 0
+            },
+            length: {
+                x: width,
+                y: height,
+                z: this.targetDepth
+            }
+        };
 
         return {
-            headerType: headerType,
-            mode: mode,
-            movementMode: (headerType === 'laser' && mode === 'greyscale') ? config.movementMode : '',
-            data: this.toolPath,
-            estimatedTime: this.estimatedTime * 3,
+            data: paths,
+            width: width,
+            height: height,
+            targetDepth: this.targetDepth,
             positionX: positionX,
             positionY: positionY,
-            positionZ: positionZ,
             boundingBox: boundingBox
         };
     };
 
-    setBoundingBox(boundingBox, linePoint) {
-        if (linePoint.X !== undefined) {
-            if (boundingBox.min.x === null) {
-                boundingBox.min.x = linePoint.X;
-            } else {
-                boundingBox.min.x = Math.min(boundingBox.min.x, linePoint.X);
-            }
-            if (boundingBox.max.x === null) {
-                boundingBox.max.x = linePoint.X;
-            } else {
-                boundingBox.max.x = Math.max(boundingBox.max.x, linePoint.X);
+    parseImageToToolPathObj = async (data) => {
+        const { jogSpeed, workSpeed, plungeSpeed } = this.gcodeConfig;
+        let { safetyHeight, stopHeight } = this.gcodeConfig;
+
+        safetyHeight = this.initialZ + safetyHeight;
+        stopHeight = this.initialZ + stopHeight;
+
+        let cutDown = true;
+        let curDepth = this.initialZ - this.stepDown;
+        let currentZ = this.initialZ;
+        let progress = 0;
+        let cutDownTimes = 0;
+
+        const normalizer = this.normalizer;
+
+        const normalizedX0 = normalizer.x(0);
+        const normalizedHeight = normalizer.y(this.targetHeight);
+        const zSteps = Math.ceil(this.targetDepth / this.stepDown) + 1;
+
+        // safeStart
+        this.toolPath.safeStart(normalizedX0, normalizedHeight, stopHeight, safetyHeight, jogSpeed);
+        this.toolPath.spindleOn({ P: 100 });
+
+        const zMin = [];
+
+        for (let j = 0; j < this.targetHeight; j++) {
+            zMin[j] = this.initialZ;
+            for (let i = 0; i < this.targetWidth; i++) {
+                const z = this._calculateThePrintZ(data[i][j]);
+                data[i][j] = round(z, 2);
+                zMin[j] = Math.min(zMin[j], z);
             }
         }
 
-        if (linePoint.Y !== undefined) {
-            if (boundingBox.min.y === null) {
-                boundingBox.min.y = linePoint.Y;
-            } else {
-                boundingBox.min.y = Math.min(boundingBox.min.y, linePoint.Y);
+        let circle = 0;
+
+        while (cutDown) {
+            cutDown = false;
+            let isOrder = true;
+            const zState = new ZState();
+
+            await this.modelInfo.taskAsyncFor(0, this.targetHeight - 1, 1, (j) => {
+                const gY = normalizer.y(this.targetHeight - 1 - j);
+
+                if (zMin[j] >= curDepth + this.stepDown) {
+                    zState.update({
+                        y: gY,
+                        z: this.initialZ,
+                        f: jogSpeed
+                    });
+                    return;
+                }
+
+                if (j > 0) {
+                    if (!this.isRotateModel) {
+                        isOrder = !isOrder;
+                    } else {
+                        circle++;
+                        this.toolPath.setCircle(circle);
+                    }
+                }
+
+                for (let k = 0; k < this.targetWidth; k++) {
+                    const i = isOrder ? k : this.targetWidth - 1 - k;
+                    const gX = normalizer.x(i);
+
+                    let z = data[i][j];
+
+                    if (z < curDepth + this.stepDown) {
+                        zState.move(this.toolPath);
+
+                        z = Math.max(curDepth, z);
+                        if (k === 0) {
+                            if (currentZ === z) {
+                                this.toolPath.move1XY(gX, gY, workSpeed);
+                            } else {
+                                this.toolPath.move1XYZ(gX, gY, z, plungeSpeed);
+                            }
+                        } else {
+                            if (currentZ === z) {
+                                this.toolPath.move1X(gX, workSpeed);
+                            } else {
+                                this.toolPath.move1XZ(gX, z, plungeSpeed);
+                            }
+                        }
+                        currentZ = z;
+                        cutDown = true;
+                    } else {
+                        zState.update({
+                            x: gX,
+                            y: gY,
+                            z: k === 0 ? this.initialZ : z,
+                            f: jogSpeed
+                        });
+                    }
+                }
+
+                zState.move(this.toolPath);
+
+                currentZ = this.initialZ;
+
+                const p = j / (this.targetHeight - 1) / zSteps + cutDownTimes / zSteps;
+                if (p - progress > 0.05) {
+                    progress = p;
+                    this.emit('progress', progress);
+                }
+            });
+            if (cutDown) {
+                this.toolPath.move0Z(safetyHeight, jogSpeed);
+                this.toolPath.move0XY(normalizedX0, normalizedHeight, jogSpeed);
+
+                currentZ = safetyHeight;
+                curDepth = round((curDepth - this.stepDown), 2);
             }
-            if (boundingBox.max.y === null) {
-                boundingBox.max.y = linePoint.Y;
-            } else {
-                boundingBox.max.y = Math.max(boundingBox.max.y, linePoint.Y);
-            }
+
+            cutDownTimes += 1;
         }
+        this.toolPath.move0Z(stopHeight, jogSpeed);
+        this.toolPath.spindleOff();
+
+        const boundingBox = this.toolPath.boundingBox;
+        const { positionX } = this.transformation;
+
+        if (this.isRotate) {
+            boundingBox.max.b += this.toolPath.toB(positionX);
+            boundingBox.min.b += this.toolPath.toB(positionX);
+        } else {
+            boundingBox.max.x += positionX;
+            boundingBox.min.x += positionX;
+        }
+        boundingBox.max.y += this.transformation.positionY;
+        boundingBox.min.y += this.transformation.positionY;
+
+        const { headType, mode, gcodeConfig } = this.modelInfo;
+
+        return {
+            headType: headType,
+            mode: mode,
+            movementMode: (headType === 'laser' && mode === 'greyscale') ? gcodeConfig.movementMode : '',
+            data: this.toolPath.commands,
+            estimatedTime: this.toolPath.estimatedTime * 1.6,
+            positionX: this.isRotate ? 0 : this.transformation.positionX,
+            positionY: this.transformation.positionY,
+            positionZ: this.transformation.positionZ,
+            rotationB: this.isRotate ? this.toolPath.toB(this.transformation.positionX) : 0,
+            boundingBox: boundingBox,
+            isRotate: this.isRotate,
+            diameter: this.diameter
+        };
+    };
+
+    async generateViewPathObj() {
+        const data = await this.this._processImage();
+        return this.isRotate ? this.parseRotateImageToViewPathObj(data)
+            : this.parseImageToViewPathObj(data);
     }
 
-
-    getLineLength3D(startPoint, endPoint) {
-        if (((endPoint.X - startPoint.X < 1e-6) && (endPoint.Y - startPoint.Y < 1e-6) && (endPoint.Z - startPoint.Z < 1e-6))
-            || startPoint.X === undefined || startPoint.Y === undefined || startPoint.Z === undefined
-            || endPoint.X === undefined || endPoint.Y === undefined || endPoint.Z === undefined) {
-            return 0;
-        }
-        return Math.sqrt((endPoint.X - startPoint.X) * (endPoint.X - startPoint.X)
-            + (endPoint.Y - startPoint.Y) * (endPoint.Y - startPoint.Y)
-            + (endPoint.Z - startPoint.Z) * (endPoint.Z - startPoint.Z));
+    async generateToolPathObj() {
+        const data = await this._processImage();
+        return this.parseImageToToolPathObj(data);
     }
 }

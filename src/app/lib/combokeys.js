@@ -21,6 +21,41 @@ const commandKeys = [
         preventDefault: true
     },
     {
+        keys: ['esc'],
+        cmd: 'ESC',
+        payload: {
+        },
+        preventDefault: true
+    },
+    {
+        keys: ['mod+a'],
+        cmd: 'SELECTALL',
+        payload: {
+        },
+        preventDefault: true
+    },
+    {
+        keys: ['mod+c'],
+        cmd: 'COPY',
+        payload: {
+        },
+        preventDefault: true
+    },
+    {
+        keys: ['mod+v'],
+        cmd: 'PASTE',
+        payload: {
+        },
+        preventDefault: true
+    },
+    {
+        keys: ['mod+z'],
+        cmd: 'UNDO',
+        payload: {
+        },
+        preventDefault: true
+    },
+    {
         keys: ['mod', 'd'].join('+'),
         cmd: 'DUPLICATE',
         payload: {
@@ -123,7 +158,7 @@ const commandKeys = [
     },
     { // Jog X+
         keys: 'right',
-        cmd: 'JOG',
+        cmd: 'Arrow',
         payload: {
             axis: AXIS_X,
             direction: FORWARD,
@@ -153,7 +188,7 @@ const commandKeys = [
     },
     { // Jog X-
         keys: 'left',
-        cmd: 'JOG',
+        cmd: 'Arrow',
         payload: {
             axis: AXIS_X,
             direction: BACKWARD,
@@ -183,7 +218,7 @@ const commandKeys = [
     },
     { // Jog Y+
         keys: 'up',
-        cmd: 'JOG',
+        cmd: 'Arrow',
         payload: {
             axis: AXIS_Y,
             direction: FORWARD,
@@ -213,7 +248,7 @@ const commandKeys = [
     },
     { // Jog Y-
         keys: 'down',
-        cmd: 'JOG',
+        cmd: 'Arrow',
         payload: {
             axis: AXIS_Y,
             direction: BACKWARD,

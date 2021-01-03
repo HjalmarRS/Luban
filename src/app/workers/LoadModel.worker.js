@@ -1,16 +1,15 @@
 import * as THREE from 'three';
 import ModelLoader from '../widgets/PrintingVisualizer/ModelLoader';
 import ConvexGeometry from '../components/three-extensions/ConvexGeometry';
-
+// import api from '../api';
 
 onmessage = (e) => {
     const { uploadPath } = e.data;
-
     new ModelLoader().load(
         uploadPath,
         (geometry) => {
             // Rotate x by 90 degrees
-            geometry.rotateX(-Math.PI / 2);
+            // geometry.rotateX(-Math.PI / 2);
 
             // Translate model by x:[-a, a]  z:[-b, b]  y:[-c, c], which center the model at zero
             geometry.computeBoundingBox();

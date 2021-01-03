@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import request from 'superagent';
 import { isUndefined } from 'lodash';
+import log from '../log';
 import DxfParser from '../../../shared/lib/DXFParser';
 import DxfShader from './DxfShaderLine';
+import { EPSILON } from '../../constants';
+
 /**
  * Returns the angle in radians of the vector (p1,p2). In other words, imagine
  * putting the base of the vector at coordinates (0,0) and finding the angle
@@ -19,6 +22,7 @@ function angle2(p1, p2) {
     if (v2.y < 0) return -Math.acos(v2.x);
     return Math.acos(v2.x);
 }
+
 function polar(point, distance, angle) {
     const result = {};
     result.x = point.x + distance * Math.cos(angle);
@@ -26,7 +30,11 @@ function polar(point, distance, angle) {
     return result;
 }
 
-THREE.BulgeGeometry = function (startPoint, endPoint, bulge, segments) {
+function isEqual(a, b) {
+    return Math.abs(a - b) < EPSILON;
+}
+
+function BulgeGeometry(startPoint, endPoint, bulge, segments) {
     let vertex, i;
     THREE.Geometry.call(this);
     const p0 = startPoint ? new THREE.Vector2(startPoint.x, startPoint.y) : new THREE.Vector2(0, 0);
@@ -40,21 +48,25 @@ THREE.BulgeGeometry = function (startPoint, endPoint, bulge, segments) {
     const radius = p0.distanceTo(p1) / 2 / Math.sin(angle / 2);
     const center = polar(startPoint, radius, angle2(p0, p1) + (Math.PI / 2 - angle / 2));
 
-    this.segments = Math.max(Math.abs(Math.ceil(angle / (Math.PI / 18))), 6); // By default want a segment roughly every 10 degrees
+    if (segments !== undefined) {
+        this.segments = segments;
+    } else {
+        this.segments = Math.max(Math.abs(Math.ceil(angle / (Math.PI / 36))), 6); // By default want a segment roughly every 5 degrees
+    }
     const startAngle = angle2(center, p0);
-    const thetaAngle = angle / segments;
+    const thetaAngle = angle / this.segments;
 
 
     this.vertices.push(new THREE.Vector3(p0.x, p0.y, 0));
 
-    for (i = 1; i <= segments - 1; i++) {
+    for (i = 1; i <= this.segments - 1; i++) {
         vertex = polar(center, Math.abs(radius), startAngle + thetaAngle * i);
 
         this.vertices.push(new THREE.Vector3(vertex.x, vertex.y, 0));
     }
-};
+}
 
-THREE.BulgeGeometry.prototype = Object.create(THREE.Geometry.prototype);
+BulgeGeometry.prototype = Object.create(THREE.Geometry.prototype);
 
 /**
  * Calculates points for a curve between two points
@@ -85,6 +97,7 @@ class ThreeDxfLoader {
     drawCircle(geometry, entity, data) {
         const color = new THREE.Color(this.getColor(entity, data));
         const interpolatedPoints = new THREE.CircleGeometry(entity.radius, 32, entity.startAngle, entity.angleLength);
+        const defaultColor = new THREE.Color(0xffffff);
 
         interpolatedPoints.vertices.map((item) => {
             item.x += entity.center.x;
@@ -93,7 +106,20 @@ class ThreeDxfLoader {
             return item;
         });
         interpolatedPoints.vertices.shift();
-        interpolatedPoints.vertices.push(interpolatedPoints.vertices[0]);
+
+        let previousPosition = { x: 0, y: 0, z: 0 };
+        if (geometry.vertices.length > 0) {
+            previousPosition = geometry.vertices[geometry.vertices.length - 1];
+        }
+        if (!isEqual(previousPosition.x, interpolatedPoints.vertices[0].x)
+            || !isEqual(previousPosition.y, interpolatedPoints.vertices[0].y)) {
+            geometry.vertices.push(previousPosition);
+            geometry.colors.push(defaultColor);
+            geometry.vertices.push(interpolatedPoints.vertices[0]);
+            geometry.colors.push(defaultColor);
+        }
+
+
         geometry.vertices.push(...interpolatedPoints.vertices);
         geometry.colors.push(...new Array(interpolatedPoints.vertices.length).fill(color));
     }
@@ -125,7 +151,7 @@ class ThreeDxfLoader {
     }
 
     drawText(entity, data) {
-        if (!this.font) return console.warn('Text is not supported without a Three.js font loaded with THREE.FontLoader! Load a font of your choice and pass this into the constructor. See the sample for this repository or Three.js examples at http://threejs.org/examples/?q=text#webgl_geometry_text for more details.');
+        if (!this.font) return log.warn('Text is not supported without a Three.js font loaded with THREE.FontLoader! Load a font of your choice and pass this into the constructor. See the sample for this repository or Three.js examples at http://threejs.org/examples/?q=text#webgl_geometry_text for more details.');
 
         const geometry = new THREE.TextGeometry(entity.text, { font: this.font, height: 0, size: entity.textHeight || 12 });
 
@@ -252,13 +278,13 @@ class ThreeDxfLoader {
             false, // Always counterclockwise
             rotation
         );
-        const interpolatedPoints = curve.getPoints(20);
-        let previewPositon = { x: 0, y: 0 };
+        const interpolatedPoints = curve.getPoints(80);
+        let previousPosition = { x: 0, y: 0, z: 0 };
         if (geometry.vertices.length > 0) {
-            previewPositon = geometry.vertices[geometry.vertices.length - 1];
+            previousPosition = geometry.vertices[geometry.vertices.length - 1];
         }
-        if ((previewPositon.x).toFixed(2) !== (interpolatedPoints[0].x).toFixed(2)
-            || (previewPositon.y).toFixed(2) !== (interpolatedPoints[0].y).toFixed(2)) {
+        if (!isEqual(previousPosition.x, interpolatedPoints[0].x)
+            || !isEqual(previousPosition.y, interpolatedPoints[0].y)) {
             geometry.vertices.push(interpolatedPoints[0]);
             geometry.colors.push(defaultColor);
         }
@@ -293,7 +319,7 @@ class ThreeDxfLoader {
         // If the text ends up being wider than the box, it's supposed
         // to be multiline. Doing that in threeJS is overkill.
         if (textWidth > entity.width) {
-            console.log("Can't render this multipline MTEXT entity, sorry.", entity);
+            log.warn("Can't render this multipline MTEXT entity, sorry.", entity);
             return undefined;
         }
 
@@ -379,9 +405,11 @@ class ThreeDxfLoader {
             } else {
                 if (entity.controlPoints.length === 4) {
                     let p0, p1;
-                    for (let t = 0; t < 1; t += 0.1) {
-                        p0 = (1 - t) ** 3 * entity.controlPoints[0].x + 3 * t * (1 - t) ** 2 * entity.controlPoints[1].x + 3 * t ** 2 * (1 - t) * entity.controlPoints[2].x + t ** 3 * entity.controlPoints[3].x;
-                        p1 = (1 - t) ** 3 * entity.controlPoints[0].y + 3 * t * (1 - t) ** 2 * entity.controlPoints[1].y + 3 * t ** 2 * (1 - t) * entity.controlPoints[2].y + t ** 3 * entity.controlPoints[3].y;
+                    for (let t = 0; t < 1; t += 0.01) {
+                        p0 = (1 - t) ** 3 * entity.controlPoints[0].x + 3 * t * (1 - t) ** 2 * entity.controlPoints[1].x
+                        + 3 * t ** 2 * (1 - t) * entity.controlPoints[2].x + t ** 3 * entity.controlPoints[3].x;
+                        p1 = (1 - t) ** 3 * entity.controlPoints[0].y + 3 * t * (1 - t) ** 2 * entity.controlPoints[1].y
+                        + 3 * t ** 2 * (1 - t) * entity.controlPoints[2].y + t ** 3 * entity.controlPoints[3].y;
                         interpolatedPoints.push({ x: p0, y: p1, z: 0 });
                     }
                 } else {
@@ -407,9 +435,9 @@ class ThreeDxfLoader {
         } else {
             previewPositon = interpolatedPoints[0];
         }
-        if ((previewPositon.x).toFixed(2) !== (interpolatedPoints[0].x).toFixed(2)
-            || (previewPositon.y).toFixed(2) !== (interpolatedPoints[0].y).toFixed(2)) {
-            splineGeo.vertices.push(splineGeo.vertices[splineGeo.vertices.length - 1]);
+        if (!isEqual(previewPositon.x, interpolatedPoints[0].x)
+            || !isEqual(previewPositon.y, interpolatedPoints[0].y)) {
+            splineGeo.vertices.push(previewPositon);
             splineGeo.colors.push(defaultColor);
             splineGeo.vertices.push(interpolatedPoints[0]);
             splineGeo.colors.push(defaultColor);
@@ -435,21 +463,24 @@ class ThreeDxfLoader {
             if (entity.vertices[i].bulge) {
                 bulge = entity.vertices[i].bulge;
                 startPoint = entity.vertices[i];
-                endPoint = i + 1 < entity.vertices.length ? entity.vertices[i + 1] : geometry.vertices[0];
+                endPoint = i + 1 < entity.vertices.length ? entity.vertices[i + 1] : entity.vertices[0];
 
-                bulgeGeometry = new THREE.BulgeGeometry(startPoint, endPoint, bulge);
+                bulgeGeometry = new BulgeGeometry(startPoint, endPoint, bulge);
                 interpolatedPoints.push(...bulgeGeometry.vertices);
             } else {
                 vertex = entity.vertices[i];
                 interpolatedPoints.push(new THREE.Vector3(vertex.x, vertex.y, 0));
             }
         }
-        let previewPositon = { x: 0, y: 0 };
+        if (entity.vertices.length > 2 && entity.shape === true) {
+            interpolatedPoints.push(new THREE.Vector3(entity.vertices[0].x, entity.vertices[0].y, 0));
+        }
+        let previewPositon = { x: 0, y: 0, z: 0 };
         if (geometry.vertices.length > 0) {
             previewPositon = geometry.vertices[geometry.vertices.length - 1];
         }
-        if ((previewPositon.x).toFixed(2) !== (interpolatedPoints[0].x).toFixed(2)
-            || (previewPositon.y).toFixed(2) !== (interpolatedPoints[0].y).toFixed(2)) {
+        if (!isEqual(previewPositon.x, interpolatedPoints[0].x)
+            || !isEqual(previewPositon.y, interpolatedPoints[0].y)) {
             geometry.vertices.push(interpolatedPoints[0]);
             geometry.colors.push(defaultColor);
         }
@@ -470,6 +501,8 @@ class ThreeDxfLoader {
         let geometry;
         if (entity.type === 'LINE' || entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
             geometry = typeGeometries.LINE;
+        } else if (entity.type === 'ARC') {
+            geometry = typeGeometries.CIRCLE;
         } else {
             geometry = typeGeometries[entity.type];
         }
@@ -492,7 +525,7 @@ class ThreeDxfLoader {
         } else if (entity.type === 'INSERT') {
             return mesh;
         } else {
-            console.log(`Unsupported Entity Type: ${entity.type}`);
+            log.warn(`Unsupported Entity Type: ${entity.type}`);
         }
 
 
@@ -576,15 +609,14 @@ class ThreeDxfLoader {
                 position.x = this.translateAndScale(position.x, centerX, scale);
                 position.y = this.translateAndScale(position.y, centerY, scale);
             } else if (entities.type === 'CIRCLE' || entities.type === 'ARC') {
-                let { radius } = entities;
                 const { center } = entities;
-                center.x = this.translateAndScale(center.x, centerX, 1);
-                center.y = this.translateAndScale(center.y, centerY, 1);
-                radius = this.translateAndScale(radius, 0, scale);
+                center.x = this.translateAndScale(center.x, centerX, scale);
+                center.y = this.translateAndScale(center.y, centerY, scale);
+                entities.radius = this.translateAndScale(entities.radius, 0, scale);
             } else if (entities.type === 'ELLIPSE') {
                 const { center, majorAxisEndPoint } = entities;
-                center.x = this.translateAndScale(center.x, centerX, 1);
-                center.y = this.translateAndScale(center.y, centerY, 1);
+                center.x = this.translateAndScale(center.x, centerX, scale);
+                center.y = this.translateAndScale(center.y, centerY, scale);
                 majorAxisEndPoint.x = this.translateAndScale(majorAxisEndPoint.x, 0, scale);
                 majorAxisEndPoint.y = this.translateAndScale(majorAxisEndPoint.y, 0, scale);
             }
@@ -730,14 +762,13 @@ class ThreeDxfLoader {
                     if (entity.block) {
                         const block = dxf.blocks[entity.block];
                         if (!block) {
-                            console.error(`Missing referenced block "${entity.block}"`);
                             continue;
                         }
                         for (let j = 0; j < block.entities.length; j++) {
                             obj = this.drawEntity(typeGeometries, block.entities[j], dxf);
                         }
                     } else {
-                        console.log('WARNING: No block for DIMENSION entity');
+                        log.warn('WARNING: No block for DIMENSION entity');
                     }
                 } else {
                     obj = this.drawEntity(typeGeometries, entity, dxf);
@@ -757,7 +788,6 @@ class ThreeDxfLoader {
                     } else {
                         const positions = [];
                         const colors = [];
-
                         for (const v of item.vertices) {
                             positions.push(v.x);
                             positions.push(v.y);

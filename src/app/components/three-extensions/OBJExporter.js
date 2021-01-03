@@ -10,11 +10,11 @@ import * as THREE from "three";
  * 2. Switch y and z (line 81) to handle left-hand and right-hand coordinate problem
  */
 
-THREE.OBJExporter = function () {};
+ function OBJExporter() {};
 
-THREE.OBJExporter.prototype = {
+OBJExporter.prototype = {
 
-	constructor: THREE.OBJExporter,
+	constructor: OBJExporter,
 
 	parse: function ( object ) {
 
@@ -80,9 +80,7 @@ THREE.OBJExporter.prototype = {
                         vertex.applyMatrix4( mesh.matrix );
 
 						// transform the vertex to export format
-                        // output += 'v ' + vertex.x + ' ' + vertex.y + ' ' + vertex.z + '\n';
-                        // modified by Walker
-						output += 'v ' + vertex.x + ' ' + (-vertex.z) + ' ' + vertex.y + '\n';
+                        output += 'v ' + vertex.x + ' ' + vertex.y + ' ' + vertex.z + '\n';
 
 					}
 
@@ -273,4 +271,4 @@ THREE.OBJExporter.prototype = {
 
 };
 
-export default THREE.OBJExporter;
+export default OBJExporter;

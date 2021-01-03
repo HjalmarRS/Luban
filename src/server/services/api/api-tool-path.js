@@ -2,11 +2,11 @@ import fs from 'fs';
 import { ERR_INTERNAL_SERVER_ERROR } from '../../constants';
 import logger from '../../lib/logger';
 import { pathWithRandomSuffix } from '../../lib/random-utils';
-import SVGParser from '../../lib/SVGParser';
+import SVGParser from '../../../shared/lib/SVGParser';
 import {
     CncToolPathGenerator, LaserToolPathGenerator, CncReliefToolPathGenerator
 } from '../../lib/ToolPathGenerator';
-import processImage from '../../lib/image-process';
+import { editorProcess } from '../../lib/editor/process';
 import DataStorage from '../../DataStorage';
 
 const log = logger('api.toolPath');
@@ -15,19 +15,19 @@ export const generate = async (req, res) => {
     const modelInfo = req.body;
     const suffix = '.json';
     // const { type, mode, source } = modelInfo;
-    const { headerType, sourceType, uploadName, mode } = modelInfo;
+    const { headType, sourceType, uploadName, mode } = modelInfo;
 
     const outputFilename = pathWithRandomSuffix(`${uploadName}.${suffix}`);
     const outputFilePath = `${DataStorage.tmpDir}/${outputFilename}`;
 
     let modelPath = null;
-    if (headerType === 'laser') {
+    if (headType === 'laser') {
         // no need to process model
         if ((sourceType === 'svg' && mode === 'vector')
             || (sourceType === 'text' && mode === 'vector')) {
             modelPath = `${DataStorage.tmpDir}/${uploadName}`;
         } else {
-            const result = await processImage(modelInfo);
+            const result = await editorProcess(modelInfo);
             modelPath = `${DataStorage.tmpDir}/${result.filename}`;
         }
 
@@ -50,13 +50,13 @@ export const generate = async (req, res) => {
                 msg: 'Internal server error'
             });
         }
-    } else if (headerType === 'cnc') {
+    } else if (headType === 'cnc') {
         const inputFilePath = `${DataStorage.tmpDir}/${uploadName}`;
         if (sourceType === 'svg' && mode === 'vector') {
             const svgParser = new SVGParser();
             try {
                 const svg = await svgParser.parseFile(inputFilePath);
-                const toolPathGenerator = new CncToolPathGenerator();
+                const toolPathGenerator = new CncToolPathGenerator(modelInfo);
                 const toolPathObject = toolPathGenerator.generateToolPathObj(svg, modelInfo);
                 fs.writeFile(outputFilePath, JSON.stringify(toolPathObject), () => {
                     res.send({
@@ -78,7 +78,7 @@ export const generate = async (req, res) => {
         }
     } else {
         res.status(ERR_INTERNAL_SERVER_ERROR).send({
-            msg: `Unsupported type: ${headerType}`
+            msg: `Unsupported type: ${headType}`
         });
     }
 };

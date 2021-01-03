@@ -10,7 +10,6 @@ import { Button } from '../../components/Buttons';
 import Modal from '../../components/Modal';
 import { controller } from '../../lib/controller';
 import i18n from '../../lib/i18n';
-// import * as widgetManager from './WidgetManager';
 import DefaultWidgets from './DefaultWidgets';
 import PrimaryWidgets from './PrimaryWidgets';
 import SecondaryWidgets from './SecondaryWidgets';
@@ -49,6 +48,8 @@ class Workspace extends PureComponent {
 
     state = {
         connected: controller.connected,
+        havePrimaryWidget: this.props.showPrimaryContainer,
+        haveSecondaryWidget: this.props.showSecondaryContainer,
         isDraggingWidget: false
     };
 
@@ -72,8 +73,6 @@ class Workspace extends PureComponent {
     };
 
     widgetEventHandler = {
-        onRemoveWidget: () => {
-        },
         onDragStart: () => {
             this.setState({ isDraggingWidget: true });
         },
@@ -176,15 +175,20 @@ class Workspace extends PureComponent {
 
     togglePrimaryContainer = () => {
         const { showPrimaryContainer } = this.props;
-        this.props.updateTabContainer('primary', { show: !showPrimaryContainer });
-
+        this.props.updateTabContainer('left', { show: !showPrimaryContainer });
+        this.setState({
+            havePrimaryWidget: !showPrimaryContainer
+        });
         // Publish a 'resize' event
         pubsub.publish('resize'); // Also see "widgets/Visualizer"
     };
 
     toggleSecondaryContainer = () => {
         const { showSecondaryContainer } = this.props;
-        this.props.updateTabContainer('secondary', { show: !showSecondaryContainer });
+        this.props.updateTabContainer('right', { show: !showSecondaryContainer });
+        this.setState({
+            haveSecondaryWidget: !showSecondaryContainer
+        });
 
         // Publish a 'resize' event
         pubsub.publish('resize'); // Also see "widgets/Visualizer"
@@ -219,6 +223,8 @@ class Workspace extends PureComponent {
         const actions = { ...this.actions };
         const {
             connected,
+            havePrimaryWidget,
+            haveSecondaryWidget,
             isDraggingWidget
         } = this.state;
         const hidePrimaryContainer = !showPrimaryContainer;
@@ -250,50 +256,50 @@ class Workspace extends PureComponent {
                         </Modal.Footer>
                     </Modal>
                 )}
-                <Dropzone
-                    disabled={isDraggingWidget || controller.workflowState !== WORKFLOW_STATE_IDLE}
-                    accept={ACCEPT}
-                    dragEnterMsg={i18n._('Drop a G-code file here.')}
-                    onDropAccepted={actions.onDropAccepted}
-                    onDropRejected={actions.onDropRejected}
-                >
-                    <div className={styles.workspaceTable}>
-                        <div className={styles.workspaceTableRow}>
-                            <div
-                                ref={this.primaryContainer}
-                                className={classNames(
-                                    styles.primaryContainer,
-                                    { [styles.hidden]: hidePrimaryContainer }
+                <div className={styles.workspaceTable}>
+                    <div className={styles.workspaceTableRow}>
+                        <div
+                            ref={this.primaryContainer}
+                            className={classNames(
+                                styles.primaryContainer,
+                                { [styles.hidden]: hidePrimaryContainer }
+                            )}
+                        >
+                            <PrimaryWidgets
+                                defaultWidgets={defaultWidgets}
+                                primaryWidgets={primaryWidgets}
+                                toggleToDefault={this.actions.toggleToDefault}
+                                onDragStart={this.widgetEventHandler.onDragStart}
+                                onDragEnd={this.widgetEventHandler.onDragEnd}
+                                updateTabContainer={this.props.updateTabContainer}
+                            />
+                        </div>
+                        <div
+                            ref={this.primaryToggler}
+                            className={classNames(styles.primaryToggler)}
+                        >
+                            <button
+                                type="button"
+                                className="btn btn-outline-secondary"
+                                onClick={this.togglePrimaryContainer}
+                            >
+                                {!hidePrimaryContainer && (
+                                    <i className="fa fa-chevron-left" style={{ verticalAlign: 'middle' }} />
                                 )}
-                            >
-                                <PrimaryWidgets
-                                    defaultWidgets={defaultWidgets}
-                                    primaryWidgets={primaryWidgets}
-                                    toggleToDefault={this.actions.toggleToDefault}
-                                    onRemoveWidget={this.widgetEventHandler.onRemoveWidget}
-                                    onDragStart={this.widgetEventHandler.onDragStart}
-                                    onDragEnd={this.widgetEventHandler.onDragEnd}
-                                    updateTabContainer={this.props.updateTabContainer}
-                                />
-                            </div>
-                            <div
-                                ref={this.primaryToggler}
-                                className={classNames(styles.primaryToggler)}
-                            >
-                                <button
-                                    type="button"
-                                    className="btn btn-outline-secondary"
-                                    onClick={this.togglePrimaryContainer}
-                                >
-                                    {!hidePrimaryContainer && (
-                                        <i className="fa fa-chevron-left" style={{ verticalAlign: 'middle' }} />
-                                    )}
-                                    {hidePrimaryContainer && (
-                                        <i className="fa fa-chevron-right" style={{ verticalAlign: 'middle' }} />
-                                    )}
-                                </button>
-                            </div>
-
+                                {hidePrimaryContainer && (
+                                    <i className="fa fa-chevron-right" style={{ verticalAlign: 'middle' }} />
+                                )}
+                            </button>
+                        </div>
+                        <Dropzone
+                            disabled={isDraggingWidget || controller.workflowState !== WORKFLOW_STATE_IDLE}
+                            accept={ACCEPT}
+                            dragEnterMsg={i18n._('Drop a G-code file here.')}
+                            havePrimaryWidget={havePrimaryWidget}
+                            haveSecondaryWidget={haveSecondaryWidget}
+                            onDropAccepted={actions.onDropAccepted}
+                            onDropRejected={actions.onDropRejected}
+                        >
                             <div
                                 ref={this.defaultContainer}
                                 className={classNames(
@@ -306,53 +312,52 @@ class Workspace extends PureComponent {
                                     toggleFromDefault={this.actions.toggleFromDefault}
                                 />
                             </div>
-                            <div
-                                ref={this.secondaryToggler}
-                                className={classNames(styles.secondaryToggler)}
+                        </Dropzone>
+                        <div
+                            ref={this.secondaryToggler}
+                            className={classNames(styles.secondaryToggler)}
+                        >
+                            <button
+                                type="button"
+                                className="btn btn-outline-secondary"
+                                onClick={this.toggleSecondaryContainer}
                             >
-                                <button
-                                    type="button"
-                                    className="btn btn-outline-secondary"
-                                    onClick={this.toggleSecondaryContainer}
-                                >
-                                    {!hideSecondaryContainer && (
-                                        <i className="fa fa-chevron-right" style={{ verticalAlign: 'middle' }} />
-                                    )}
-                                    {hideSecondaryContainer && (
-                                        <i className="fa fa-chevron-left" style={{ verticalAlign: 'middle' }} />
-                                    )}
-                                </button>
-                            </div>
-                            <div
-                                ref={this.secondaryContainer}
-                                className={classNames(
-                                    styles.secondaryContainer,
-                                    { [styles.hidden]: hideSecondaryContainer }
+                                {!hideSecondaryContainer && (
+                                    <i className="fa fa-chevron-right" style={{ verticalAlign: 'middle' }} />
                                 )}
-                            >
-                                <SecondaryWidgets
-                                    defaultWidgets={defaultWidgets}
-                                    secondaryWidgets={secondaryWidgets}
-                                    toggleToDefault={this.actions.toggleToDefault}
-                                    onRemoveWidget={this.widgetEventHandler.onRemoveWidget}
-                                    onDragStart={this.widgetEventHandler.onDragStart}
-                                    onDragEnd={this.widgetEventHandler.onDragEnd}
-                                    updateTabContainer={this.props.updateTabContainer}
-                                />
-                            </div>
+                                {hideSecondaryContainer && (
+                                    <i className="fa fa-chevron-left" style={{ verticalAlign: 'middle' }} />
+                                )}
+                            </button>
+                        </div>
+                        <div
+                            ref={this.secondaryContainer}
+                            className={classNames(
+                                styles.secondaryContainer,
+                                { [styles.hidden]: hideSecondaryContainer }
+                            )}
+                        >
+                            <SecondaryWidgets
+                                defaultWidgets={defaultWidgets}
+                                secondaryWidgets={secondaryWidgets}
+                                toggleToDefault={this.actions.toggleToDefault}
+                                onDragStart={this.widgetEventHandler.onDragStart}
+                                onDragEnd={this.widgetEventHandler.onDragEnd}
+                                updateTabContainer={this.props.updateTabContainer}
+                            />
                         </div>
                     </div>
-                </Dropzone>
+                </div>
             </div>
         );
     }
 }
 const mapStateToProps = (state) => {
     const widget = state.widget;
-    const showPrimaryContainer = widget.workspace.primary.show;
-    const primaryWidgets = widget.workspace.primary.widgets;
-    const showSecondaryContainer = widget.workspace.secondary.show;
-    const secondaryWidgets = widget.workspace.secondary.widgets;
+    const showPrimaryContainer = widget.workspace.left.show;
+    const primaryWidgets = widget.workspace.left.widgets;
+    const showSecondaryContainer = widget.workspace.right.show;
+    const secondaryWidgets = widget.workspace.right.widgets;
     const defaultWidgets = widget.workspace.default.widgets;
     return {
         showPrimaryContainer,

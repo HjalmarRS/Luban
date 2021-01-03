@@ -4,9 +4,10 @@ import mv from 'mv';
 import jimp from 'jimp';
 import async from 'async';
 import logger from '../../lib/logger';
-import SVGParser from '../../lib/SVGParser';
+import SVGParser from '../../../shared/lib/SVGParser';
 import { parseDxf } from '../../../shared/lib/DXFParser/Parser';
-import imageProcess from '../../lib/image-process';
+import { unzipFile } from '../../lib/archive';
+import { editorProcess } from '../../lib/editor/process';
 import { pathWithRandomSuffix } from '../../lib/random-utils';
 import stockRemap from '../../lib/stock-remap';
 import trace from '../../lib/image-trace';
@@ -14,25 +15,45 @@ import { ERR_INTERNAL_SERVER_ERROR } from '../../constants';
 import DataStorage from '../../DataStorage';
 import { stitch, stitchEach } from '../../lib/image-stitch';
 import { calibrationPhoto, getCameraCalibration, getPhoto, setMatrix, takePhoto } from '../../lib/image-getPhoto';
-
+import { MeshProcess } from '../../lib/MeshProcess/MeshProcess';
+import { mmToPixel } from '../../../shared/lib/utils';
 
 const log = logger('api:image');
 
 export const set = (req, res) => {
-    const file = req.files.image;
-    const originalName = path.basename(file.name);
-
-    const uploadName = pathWithRandomSuffix(originalName);
-    const uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
+    const files = req.files;
+    const { isRotate } = req.body;
+    let originalName, uploadName, uploadPath, originalPath;
+    // if 'files' does not exist, the model in the case library is being loaded
+    if (files) {
+        const file = files.image;
+        originalName = path.basename(file.name);
+        uploadName = pathWithRandomSuffix(originalName);
+        uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
+        originalPath = file.path;
+    } else {
+        const { name, casePath } = req.body;
+        originalName = path.basename(name);
+        originalPath = `${DataStorage.userCaseDir}/${casePath}/${name}`;
+        uploadName = pathWithRandomSuffix(originalName);
+        uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
+    }
+    const extname = path.extname(uploadName).toLowerCase();
 
     async.series([
         (next) => {
-            mv(file.path, uploadPath, () => {
-                next();
-            });
+            if (files) {
+                mv(originalPath, uploadPath, () => {
+                    next();
+                });
+            } else {
+                fs.copyFile(originalPath, uploadPath, () => {
+                    next();
+                });
+            }
         },
         async (next) => {
-            if (path.extname(uploadName) === '.svg') {
+            if (extname === '.svg') {
                 const svgParser = new SVGParser();
                 const svg = await svgParser.parseFile(uploadPath);
 
@@ -44,11 +65,11 @@ export const set = (req, res) => {
                 });
 
                 next();
-            } else if (path.extname(uploadName) === '.dxf') {
-                const { width, height, svg } = await parseDxf(uploadPath);
+            } else if (extname === '.dxf') {
+                const result = await parseDxf(uploadPath);
+                const { width, height } = result;
 
                 res.send({
-                    svg,
                     originalName: originalName,
                     uploadName: uploadName,
                     width,
@@ -56,54 +77,19 @@ export const set = (req, res) => {
                 });
 
                 next();
-            } else {
-                jimp.read(uploadPath).then((image) => {
-                    res.send({
-                        originalName: originalName,
-                        uploadName: uploadName,
-                        width: image.bitmap.width,
-                        height: image.bitmap.height
-                    });
-                    next();
-                }).catch((err) => {
-                    next(err);
-                });
-            }
-        }
-    ], (err) => {
-        if (err) {
-            log.error(`Failed to read image ${uploadName}`);
-            res.status(ERR_INTERNAL_SERVER_ERROR).end();
-        } else {
-            res.end();
-        }
-    });
-};
-
-export const laserCaseImage = (req, res) => {
-    const { name, casePath } = req.body;
-    const originalName = path.basename(name);
-
-    const originalPath = `${DataStorage.userCaseDir}/${casePath}/${name}`;
-    const uploadName = pathWithRandomSuffix(originalName);
-    const uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
-
-    async.series([
-        (next) => {
-            fs.copyFile(originalPath, uploadPath, () => {
-                next();
-            });
-        },
-        async (next) => {
-            if (path.extname(uploadName) === '.svg') {
-                const svgParser = new SVGParser();
-                const svg = await svgParser.parseFile(uploadPath);
-
+            } else if (extname === '.stl' || extname === '.zip') {
+                if (extname === '.zip') {
+                    await unzipFile(`${uploadName}`, `${DataStorage.tmpDir}`);
+                    originalName = originalName.replace(/\.zip$/, '');
+                    uploadName = originalName;
+                }
+                const meshProcess = new MeshProcess({ uploadName, materials: { isRotate: (isRotate === 'true' || isRotate === true) } });
+                const { width, height } = meshProcess.getWidthAndHeight();
                 res.send({
                     originalName: originalName,
                     uploadName: uploadName,
-                    width: svg.width,
-                    height: svg.height
+                    width: mmToPixel(width),
+                    height: mmToPixel(height)
                 });
                 next();
             } else {
@@ -138,17 +124,7 @@ export const laserCaseImage = (req, res) => {
 export const process = (req, res) => {
     const options = req.body;
 
-    let imageOptions;
-    if (options.image) {
-        imageOptions = {
-            ...options,
-            image: `${DataStorage.tmpDir}/${path.parse(options.image).base}`
-        };
-    } else {
-        imageOptions = options;
-    }
-
-    imageProcess(imageOptions)
+    editorProcess(options)
         .then((result) => {
             res.send(result);
         })

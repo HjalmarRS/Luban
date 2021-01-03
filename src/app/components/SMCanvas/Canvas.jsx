@@ -7,18 +7,16 @@
 
 import noop from 'lodash/noop';
 import React, { Component } from 'react';
-import { Vector3, Color, PerspectiveCamera, Scene, Group, HemisphereLight, WebGLRenderer } from 'three';
+import { Vector3, Color, PerspectiveCamera, Scene, Group, HemisphereLight, DirectionalLight, WebGLRenderer } from 'three';
 import Detector from 'three/examples/js/Detector';
 import PropTypes from 'prop-types';
 import TWEEN from '@tweenjs/tween.js';
 import Controls, { EVENTS } from './Controls';
-// import MSRControls from '../three-extensions/MSRControls';
-// import TransformControls from '../three-extensions/TransformControls';
-// import TransformControls2D from '../three-extensions/TransformControls2D';
 
 
 const ANIMATION_DURATION = 500;
 const DEFAULT_MODEL_POSITION = new Vector3(0, 0, 0);
+const EPS = 0.000001;
 
 
 class Canvas extends Component {
@@ -29,17 +27,30 @@ class Canvas extends Component {
         modelGroup: PropTypes.object.isRequired,
         printableArea: PropTypes.object.isRequired,
         transformSourceType: PropTypes.string, // 2D, 3D. Default is 3D
-        toolPathModelGroup: PropTypes.object,
+        toolPathModelGroupObject: PropTypes.object,
         gcodeLineGroup: PropTypes.object,
         cameraInitialPosition: PropTypes.object.isRequired,
+        cameraInitialTarget: PropTypes.object.isRequired,
+        cameraUp: PropTypes.object,
+        scale: PropTypes.number,
+        target: PropTypes.object,
+        supportActions: PropTypes.object,
+
         // callback
-        onSelectModel: PropTypes.func,
-        onUnselectAllModels: PropTypes.func,
+        onSelectModels: PropTypes.func,
+        updateTarget: PropTypes.func,
+        updateScale: PropTypes.func,
         onModelAfterTransform: PropTypes.func,
         onModelTransform: PropTypes.func,
 
         // tmp
+        canOperateModel: PropTypes.bool,
+        // isToolpathModel: PropTypes.bool,
         showContextMenu: PropTypes.func
+    };
+
+    static defaultProps = {
+        canOperateModel: true
     };
 
     controls = null;
@@ -50,6 +61,8 @@ class Canvas extends Component {
 
     initialTarget = new Vector3();
 
+    lastTarget = null;
+
     constructor(props) {
         super(props);
 
@@ -57,28 +70,28 @@ class Canvas extends Component {
         this.backgroundGroup = this.props.backgroundGroup;
         this.printableArea = this.props.printableArea;
         this.modelGroup = this.props.modelGroup;
-        this.transformSourceType = this.props.transformSourceType || '3D';
-        this.toolPathModelGroup = this.props.toolPathModelGroup;
+        this.transformSourceType = this.props.transformSourceType || '3D'; // '3D' | '2D'
+        this.toolPathModelGroupObject = this.props.toolPathModelGroupObject;
         this.gcodeLineGroup = this.props.gcodeLineGroup;
         this.cameraInitialPosition = this.props.cameraInitialPosition;
 
         // callback
-        this.onSelectModel = this.props.onSelectModel || noop;
-        this.onUnselectAllModels = this.props.onUnselectAllModels || noop;
+        this.onSelectModels = this.props.onSelectModels || noop;
         this.onModelAfterTransform = this.props.onModelAfterTransform || noop;
         this.onModelTransform = this.props.onModelTransform || noop;
 
         this.transformMode = 'translate'; // transformControls mode: translate/scale/rotate
 
         // controls
-        this.msrControls = null; // pan/scale/rotate print area
         this.transformControls = null; // pan/scale/rotate selected model
+
 
         // threejs
         this.camera = null;
         this.renderer = null;
         this.scene = null;
         this.group = null;
+        this.light = null;
     }
 
     componentDidMount() {
@@ -87,10 +100,8 @@ class Canvas extends Component {
 
         this.group.add(this.printableArea);
         this.printableArea.addEventListener('update', () => this.renderScene()); // TODO: another way to trigger re-render
-
-        this.group.add(this.modelGroup);
-
-        this.toolPathModelGroup && this.group.add(this.toolPathModelGroup);
+        this.group.add(this.modelGroup.object);
+        this.toolPathModelGroupObject && this.group.add(this.toolPathModelGroupObject);
         this.gcodeLineGroup && this.group.add(this.gcodeLineGroup);
         this.backgroundGroup && this.group.add(this.backgroundGroup);
 
@@ -99,14 +110,55 @@ class Canvas extends Component {
         window.addEventListener('resize', this.resizeWindow, false);
     }
 
+    // just for laser and cnc, dont set scale prop for 3dp
+    componentWillReceiveProps(nextProps) {
+        if (nextProps.scale && nextProps.scale !== this.lastScale) {
+            const currentScale = this.initialDistance / (this.camera.position.distanceTo(this.controls.target));
+            this.controls.setScale(currentScale / nextProps.scale);
+            this.lastScale = nextProps.scale;
+            this.controls.updateCamera();
+        }
+        if (nextProps.target && nextProps.target !== this.lastTarget) {
+            const { x, y } = nextProps.target;
+            this.controls.panOffset.add(new Vector3(x - this.controls.target.x, y - this.controls.target.y, 0));
+            this.controls.updateCamera();
+        }
+        if (this.props.toolPathModelGroupObject) {
+            if (this.props.toolPathModelGroupObject.isRotate && this.props.toolPathModelGroupObject.visible) {
+                this.controls.setShouldForbidSelect(true);
+            } else {
+                this.controls.setShouldForbidSelect(false);
+            }
+        }
+    }
+
     componentWillUnmount() {
         if (this.controls) {
             this.controls.dispose();
         }
 
-        this.msrControls && this.msrControls.dispose();
         this.transformControls && this.transformControls.dispose();
     }
+
+    onScale = () => {
+        if (typeof this.props.updateScale !== 'function') {
+            return;
+        }
+        const currentScale = this.initialDistance / (this.camera.position.distanceTo(this.controls.target));
+        if (Math.abs(currentScale - this.lastScale) > EPS) {
+            this.lastScale = currentScale;
+            this.props.updateScale(currentScale);
+        }
+    };
+
+    onChangeTarget = () => {
+        if (typeof this.props.updateTarget !== 'function') {
+            return;
+        }
+        const { x, y } = this.controls.target;
+        this.lastTarget = { x, y };
+        this.props.updateTarget(this.lastTarget);
+    };
 
     getVisibleWidth() {
         return this.node.current.parentElement.clientWidth;
@@ -122,6 +174,18 @@ class Canvas extends Component {
 
         this.camera = new PerspectiveCamera(45, width / height, 0.1, 10000);
         this.camera.position.copy(this.cameraInitialPosition);
+        if (this.transformSourceType === '2D') {
+            this.light = new DirectionalLight(0xffffff, 0.6);
+        }
+        if (this.transformSourceType === '3D') {
+            this.light = new DirectionalLight(0x666666, 0.4);
+        }
+        this.light.position.copy(this.cameraInitialPosition);
+
+        // We need to change the default up vector if we use camera to respect XY plane
+        if (this.props.cameraUp) {
+            this.camera.up = this.props.cameraUp;
+        }
 
         this.renderer = new WebGLRenderer({ antialias: true });
         this.renderer.setClearColor(new Color(0xfafafa), 1);
@@ -130,66 +194,65 @@ class Canvas extends Component {
 
         this.scene = new Scene();
         this.scene.add(this.camera);
+        this.scene.add(this.light);
 
         this.group = new Group();
         this.group.position.copy(DEFAULT_MODEL_POSITION);
         this.scene.add(this.group);
 
-        this.scene.add(new HemisphereLight(0x000000, 0xe0e0e0));
+        if (this.transformSourceType === '3D') {
+            const lightTop = new HemisphereLight(0xdddddd, 0x666666);
+            lightTop.position.copy(new Vector3(0, 0, 1000));
+            this.scene.add(lightTop);
+        }
+        if (this.transformSourceType === '2D') {
+            this.scene.add(new HemisphereLight(0x000000, 0xcecece));
+        }
 
         this.node.current.appendChild(this.renderer.domElement);
     }
 
     setupControls() {
-        this.initialTarget.set(0, this.cameraInitialPosition.y, 0);
+        this.initialTarget = this.props.cameraInitialTarget;
 
         const sourceType = this.props.transformSourceType === '2D' ? '2D' : '3D';
 
-        this.controls = new Controls(sourceType, this.camera, this.group, this.renderer.domElement);
+        this.controls = new Controls(sourceType, this.camera, this.group, this.renderer.domElement, this.onScale, this.onChangeTarget,
+            this.props.supportActions);
+        this.controls.canOperateModel = this.props.canOperateModel;
+        this.setCamera(this.cameraInitialPosition, this.initialTarget);
 
         this.controls.setTarget(this.initialTarget);
-        this.controls.setSelectableObjects(this.modelGroup.children);
-
+        this.controls.setSelectableObjects(this.modelGroup.object);
 
         this.controls.on(EVENTS.UPDATE, () => {
             this.renderScene();
         });
+        this.controls.on(EVENTS.SELECT_OBJECTS, (intersect, selectEvent) => {
+            this.onSelectModels(intersect, selectEvent);
+        });
+
         this.controls.on(EVENTS.CONTEXT_MENU, (e) => {
-            if (this.props.showContextMenu) {
+            if (this.props.showContextMenu && this.props.canOperateModel) {
                 this.props.showContextMenu(e);
             }
         });
-        this.controls.on(EVENTS.SELECT_OBJECT, (object) => {
-            this.onSelectModel(object);
-        });
-        this.controls.on(EVENTS.UNSELECT_OBJECT, () => {
-            this.onUnselectAllModels();
-        });
         this.controls.on(EVENTS.TRANSFORM_OBJECT, () => {
-            this.onModelTransform();
+            if (this.props.canOperateModel) {
+                this.onModelTransform();
+            }
         });
         this.controls.on(EVENTS.AFTER_TRANSFORM_OBJECT, () => {
             this.onModelAfterTransform();
         });
-
-        // this.msrControls = new MSRControls(this.group, this.camera, this.renderer.domElement, this.props.size);
-        // this.msrControls = new MSRControls(this.group, this.camera, this.renderer.domElement, this.props.size);
-        // triggered first, when "mouse down on canvas"
-        /*
-        this.msrControls.addEventListener(
-            'move',
-            () => {
-                this.updateTransformControl2D();
-            }
-        );
-        */
     }
 
     setTransformMode(mode) {
         if (['translate', 'scale', 'rotate'].includes(mode)) {
             this.transformControls && this.transformControls.setMode(mode);
-
             this.controls && this.controls.setTransformMode(mode);
+        } else {
+            this.controls && this.controls.setTransformMode(null);
         }
     }
 
@@ -213,6 +276,23 @@ class Canvas extends Component {
 
         this.renderScene();
     };
+
+    setCamera = (position, target) => {
+        this.camera.position.copy(position);
+        this.controls.setTarget(target);
+        this.renderScene();
+
+        if (position.x === 0 && position.y === 0) {
+            this.initialDistance = (position.z - target.z);
+        }
+    };
+
+    setCameraOnTop = () => {
+        const dist = this.camera.position.distanceTo(this.controls.target);
+        this.camera.position.copy(new Vector3(0, 0, dist));
+        this.controls.setTarget(new Vector3(0, 0, 0));
+        this.controls.updateCamera();
+    }
 
     resizeWindow = () => {
         const width = this.getVisibleWidth();
@@ -261,10 +341,8 @@ class Canvas extends Component {
     }
 
     autoFocus(model) {
-        this.camera.position.copy(this.cameraInitialPosition);
-
-        const target = model ? model.position.clone() : new Vector3(0, this.cameraInitialPosition.y, 0);
-        this.controls.setTarget(target);
+        const target = model ? model.position.clone() : this.initialTarget;
+        this.setCamera(this.cameraInitialPosition, target);
 
         const object = {
             positionX: this.camera.position.x,
@@ -289,10 +367,20 @@ class Canvas extends Component {
         this.startTween(tween);
     }
 
+    toFront() {
+        this.camera.position.x = this.cameraInitialPosition.x;
+        this.camera.position.y = this.cameraInitialPosition.y;
+        this.camera.position.z = this.cameraInitialPosition.z;
+        this.controls.setTarget(new Vector3(0, 0, this.cameraInitialPosition.z));
+        // this.camera.lookAt(new Vector3(0, 0, this.cameraInitialPosition.z));
+        this.renderScene();
+    }
+
     toLeft() {
-        this.camera.rotation.x = 0;
+        this.camera.rotation.x = Math.PI / 2;
         this.camera.rotation.z = 0;
 
+        // BTH, I don't know why Y rotation is applied before X rotation, so here we can't change rotation.z
         const object = {
             rotationY: this.camera.rotation.y
         };
@@ -307,14 +395,14 @@ class Canvas extends Component {
                 this.camera.rotation.y = rotation;
 
                 this.camera.position.x = this.controls.target.x + Math.sin(rotation) * dist;
-                this.camera.position.y = this.controls.target.y;
-                this.camera.position.z = this.controls.target.z + Math.cos(rotation) * dist;
+                this.camera.position.y = this.controls.target.y - Math.cos(rotation) * dist;
+                this.camera.position.z = this.controls.target.z;
             });
         this.startTween(tween);
     }
 
     toRight() {
-        this.camera.rotation.x = 0;
+        this.camera.rotation.x = Math.PI / 2;
         this.camera.rotation.z = 0;
 
         const object = {
@@ -331,8 +419,8 @@ class Canvas extends Component {
                 this.camera.rotation.y = rotation;
 
                 this.camera.position.x = this.controls.target.x + Math.sin(rotation) * dist;
-                this.camera.position.y = this.controls.target.y;
-                this.camera.position.z = this.controls.target.z + Math.cos(rotation) * dist;
+                this.camera.position.y = this.controls.target.y - Math.cos(rotation) * dist;
+                this.camera.position.z = this.controls.target.z;
             });
         this.startTween(tween);
     }
@@ -414,6 +502,8 @@ class Canvas extends Component {
     }
 
     renderScene() {
+        this.light.position.copy(this.camera.position);
+
         this.renderer.render(this.scene, this.camera);
 
         TWEEN.update();

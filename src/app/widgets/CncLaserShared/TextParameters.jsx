@@ -3,26 +3,25 @@ import PropTypes from 'prop-types';
 import classNames from 'classnames';
 import { connect } from 'react-redux';
 import Select from 'react-select';
-
 import i18n from '../../lib/i18n';
 import Anchor from '../../components/Anchor';
 import { NumberInput as Input } from '../../components/Input';
 import TipTrigger from '../../components/TipTrigger';
-import { actions as textActions } from '../../flux/text';
 
 
 class TextParameters extends PureComponent {
     static propTypes = {
         fontOptions: PropTypes.array,
+        disabled: PropTypes.bool,
         config: PropTypes.shape({
             text: PropTypes.string,
-            size: PropTypes.number,
-            font: PropTypes.string,
+            'font-size': PropTypes.string,
+            'font-family': PropTypes.string,
             lineHeight: PropTypes.number,
             alignment: PropTypes.string
         }),
-        uploadFont: PropTypes.func.isRequired,
-        updateSelectedModelTextConfig: PropTypes.func.isRequired
+
+        modifyText: PropTypes.func.isRequired
     };
 
     state = {
@@ -30,6 +29,8 @@ class TextParameters extends PureComponent {
     };
 
     fileInput = React.createRef();
+
+    textArea = React.createRef();
 
     actions = {
         onToggleExpand: () => {
@@ -39,33 +40,33 @@ class TextParameters extends PureComponent {
             this.fileInput.current.value = null;
             this.fileInput.current.click();
         },
-        onChangeFile: (event) => {
-            const file = event.target.files[0];
-            this.props.uploadFont(file);
+        onSelectAllText: () => {
+            this.textArea.current.select();
         },
         onChangeText: (event) => {
             const text = event.target.value;
-            this.props.updateSelectedModelTextConfig({ text });
+
+            this.props.modifyText(null, { text });
         },
         onChangeFont: (option) => {
+            // Upload font (TODO: not used?)
+            if (option.value === 'AddFonts') {
+                this.actions.onClickUpload();
+                return;
+            }
+
             const font = option.value;
-            this.props.updateSelectedModelTextConfig({ font });
+
+            this.props.modifyText(null, { fontFamily: font });
         },
         onChangeSize: (size) => {
-            this.props.updateSelectedModelTextConfig({ size });
-        },
-        onChangeLineHeight: (lineHeight) => {
-            this.props.updateSelectedModelTextConfig({ lineHeight });
-        },
-        onChangeAlignment: (option) => {
-            const alignment = option.value;
-            this.props.updateSelectedModelTextConfig({ alignment });
+            this.props.modifyText(null, { fontSize: size });
         }
     };
 
     render() {
-        const { config, fontOptions } = this.props;
-        const { text, size, font, lineHeight, alignment } = config;
+        const { config, fontOptions, disabled } = this.props;
+        const { text, 'font-size': fontSize, 'font-family': fontFamily } = config;
         const actions = this.actions;
 
         return (
@@ -92,6 +93,9 @@ Start a new line manually according to your needs.')}
                             <div className="sm-parameter-row" style={{ height: '68px' }}>
                                 <span className="sm-parameter-row__label">{i18n._('Text')}</span>
                                 <textarea
+                                    ref={this.textArea}
+                                    disabled={disabled}
+                                    onFocus={actions.onSelectAllText}
                                     style={{ width: '202px', float: 'right', resize: 'none' }}
                                     className="form-control"
                                     rows="3"
@@ -102,42 +106,20 @@ Start a new line manually according to your needs.')}
                         </TipTrigger>
                         <TipTrigger
                             title={i18n._('Font')}
-                            content={i18n._('Select a word font or upload a font from your computer. WOFF, TTF, OTF fonts are supported.')}
+                            content={i18n._('Select a font')}
                         >
                             <div className="sm-parameter-row">
                                 <span className="sm-parameter-row__label">{i18n._('Font')}</span>
-                                <input
-                                    ref={this.fileInput}
-                                    type="file"
-                                    accept=".woff, .ttf, .otf"
-                                    style={{ display: 'none' }}
-                                    multiple={false}
-                                    onChange={actions.onChangeFile}
-                                />
-                                <button
-                                    type="button"
-                                    style={{
-                                        display: 'inline-block',
-                                        width: '15%',
-                                        float: 'right',
-                                        padding: '5px 6px',
-                                        marginLeft: '4px',
-                                        height: '30px'
-                                    }}
-                                    className="sm-btn-small sm-btn-default"
-                                    title={i18n._('Upload')}
-                                    onClick={actions.onClickUpload}
-                                >
-                                    <i className="fa fa-upload" />
-                                </button>
                                 <Select
-                                    className="sm-parameter-row__select"
+                                    disabled={disabled}
+                                    className="sm-parameter-row__font-select"
+                                    // style={{ width: '202px', float: 'right' }}
                                     backspaceRemoves={false}
                                     clearable={false}
                                     searchable={false}
                                     options={fontOptions}
                                     placeholder={i18n._('Choose font')}
-                                    value={font}
+                                    value={fontFamily}
                                     onChange={actions.onChangeFont}
                                 />
                             </div>
@@ -149,21 +131,29 @@ Start a new line manually according to your needs.')}
                             <div className="sm-parameter-row">
                                 <span className="sm-parameter-row__label">{i18n._('Font Size')}</span>
                                 <Input
+                                    disabled={disabled}
                                     className="sm-parameter-row__input"
-                                    value={size}
+                                    value={parseInt(fontSize, 10)}
                                     onChange={actions.onChangeSize}
                                 />
                                 <span className="sm-parameter-row__input-unit">pt</span>
                             </div>
                         </TipTrigger>
-                        <TipTrigger
+                        {/* <TipTrigger
                             title={i18n._('Line Height')}
                             content={i18n._('Set the distance between each line in the text. The value you enter is the multiple of the font size.')}
                         >
                             <div className="sm-parameter-row">
                                 <span className="sm-parameter-row__label">{i18n._('Line Height')}</span>
-                                <Input
-                                    className="sm-parameter-row__input"
+
+                                <Select
+                                    disabled={disabled}
+                                    className="sm-parameter-row__select"
+                                    backspaceRemoves={false}
+                                    clearable={false}
+                                    searchable={false}
+                                    options={[
+                                    ]}
                                     value={lineHeight}
                                     onChange={actions.onChangeLineHeight}
                                 />
@@ -176,22 +166,43 @@ Start a new line manually according to your needs.')}
                         >
                             <div className="sm-parameter-row">
                                 <span className="sm-parameter-row__label">{i18n._('Alignment')}</span>
-                                <Select
-                                    className="sm-parameter-row__select"
-                                    backspaceRemoves={false}
-                                    clearable={false}
-                                    searchable={false}
-                                    options={[
-                                        { label: i18n._('Left'), value: 'left' },
-                                        { label: i18n._('Middle'), value: 'middle' },
-                                        { label: i18n._('Right'), value: 'right' }
-                                    ]}
-                                    placeholder={i18n._('Alignment')}
-                                    value={alignment}
-                                    onChange={actions.onChangeAlignment}
-                                />
+                                <span className={styles.textAlignWrap}>
+                                    <button
+                                        className={classNames(
+                                            styles.textAlignButton,
+                                            { [styles.active]: alignment === 'left' }
+                                        )}
+                                        type="button"
+                                        disabled={disabled}
+                                        onClick={() => { actions.onChangeAlignment('left'); }}
+                                    >
+                                        <IconAlignLeft size={16} color="#666666" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={classNames(
+                                            styles.textAlignButton,
+                                            { [styles.active]: alignment === 'middle' },
+                                        )}
+                                        disabled={disabled}
+                                        onClick={() => { actions.onChangeAlignment('middle'); }}
+                                    >
+                                        <IconAlignCenter size={16} color="#666666" />
+                                    </button>
+                                    <button
+                                        className={classNames(
+                                            styles.textAlignButton,
+                                            { [styles.active]: alignment === 'right' },
+                                        )}
+                                        type="button"
+                                        disabled={disabled}
+                                        onClick={() => { actions.onChangeAlignment('right'); }}
+                                    >
+                                        <IconAlignRight size={16} color="#666666" />
+                                    </button>
+                                </span>
                             </div>
-                        </TipTrigger>
+                        </TipTrigger> */}
                     </React.Fragment>
                 )}
             </div>
@@ -210,10 +221,4 @@ const mapStateToProps = (state) => {
     };
 };
 
-const mapDispatchToProps = (dispatch) => {
-    return {
-        uploadFont: (file) => dispatch(textActions.uploadFont(file))
-    };
-};
-
-export default connect(mapStateToProps, mapDispatchToProps)(TextParameters);
+export default connect(mapStateToProps)(TextParameters);

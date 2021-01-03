@@ -39,6 +39,8 @@ function parseLWPolylineVertices(n, scanner) {
                     if (curr.value !== 0) vertex.bulge = curr.value;
                     break;
                 default:
+                    // https://github.com/gdsestimating/dxf-parser/issues/47
+                    scanner.rewind();
                     // if we do not hit known code return vertices.  Code might belong to entity
                     if (vertexIsStarted) {
                         vertices.push(vertex);
@@ -60,7 +62,7 @@ export default function EntityParser() {}
 
 EntityParser.ForEntityName = 'LWPOLYLINE';
 
-EntityParser.prototype.parseEntity = function (scanner, curr) {
+EntityParser.prototype.parseEntity = function parseEntity(scanner, curr) {
     const entity = { type: curr.value, vertices: [] };
     let numberOfVertices = 0;
     curr = scanner.next();

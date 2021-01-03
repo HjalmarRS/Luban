@@ -7,7 +7,7 @@ const RCFILE = '.snapmaker-luban.json';
 // Secret
 const secret = pkg.version;
 
-const getUserHome = () => (process.env[(process.platform === 'win32') ? 'USERPROFILE' : 'HOME']);
+const getUserHome = () => ((process.env[(process.platform === 'win32') ? 'USERPROFILE' : 'HOME']) || '');
 
 export default {
     rcfile: path.resolve(getUserHome(), RCFILE),
@@ -110,6 +110,7 @@ export default {
         'nl', // Dutch
         'pt-br', // Portuguese (Brazil)
         'ru', // Russian
+        'uk', // Ukrainian
         'zh-cn', // Simplified Chinese
         'zh-tw' // Traditional Chinese
     ],
@@ -147,6 +148,7 @@ export default {
             'nl', // Dutch
             'pt-br', // Portuguese (Brazil)
             'ru', // Russian
+            'uk', // Ukrainian
             'zh-cn', // Simplified Chinese
             'zh-tw' // Traditional Chinese
         ],

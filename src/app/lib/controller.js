@@ -41,6 +41,7 @@ class SerialPortClient {
         'serialport:open': [],
         'serialport:connected': [],
         'serialport:close': [],
+        'serialport:emergencyStop': [],
         'serialport:read': [],
         'serialport:write': [],
 
@@ -64,8 +65,12 @@ class SerialPortClient {
         // Async tasks
         'taskProgress:generateToolPath': [],
         'taskProgress:generateGcode': [],
+        'taskProgress:processImage': [],
         'taskCompleted:generateToolPath': [],
-        'taskCompleted:generateGcode': []
+        'taskCompleted:generateGcode': [],
+        'taskCompleted:processImage': [],
+        'taskProgress:generateViewPath': [],
+        'taskCompleted:generateViewPath': []
     };
 
     dataSource = '';
@@ -235,8 +240,16 @@ class SerialPortClient {
         socketController.emit('taskCommit:generateToolPath', task);
     }
 
+    commitViewPathTask(task) {
+        socketController.emit('taskCommit:generateViewPath', task);
+    }
+
     commitGcodeTask(task) {
         socketController.emit('taskCommit:generateGcode', task);
+    }
+
+    commitProcessImage(task) {
+        socketController.emit('taskCommit:processImage', task);
     }
 
     // command(cmd, ...args) {

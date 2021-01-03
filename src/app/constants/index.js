@@ -44,24 +44,161 @@ export const STAGE_PREVIEWING = 2;
 export const STAGE_PREVIEWED = 3;
 export const STAGE_GENERATED = 4;
 
+export const PAGE_EDITOR = 'editor';
+export const PAGE_PROCESS = 'process';
+
 // Stages for 3d print
 export const STAGES_3DP = {
     noModel: 10,
     modelLoaded: 11,
     gcodeRendered: 12
 };
+// !important: keys in PRINTING_QUALITY_CONFIG_KEYS, PRINTING_QUALITY_CONFIG_GROUP should change togethor
+export const PRINTING_MATERIAL_CONFIG_KEYS = [
+    'material_diameter',
+    'material_flow',
+    'material_print_temperature',
+    'material_print_temperature_layer_0',
+    'material_final_print_temperature',
+    'machine_heated_bed',
+    'material_bed_temperature',
+    'material_bed_temperature_layer_0'
+];
+export const PRINTING_QUALITY_CONFIG_KEYS = [
+    'layer_height',
+    'layer_height_0',
+    'initial_layer_line_width_factor',
+    'wall_thickness',
+    'top_thickness',
+    'bottom_thickness',
+    'outer_inset_first',
+    'infill_sparse_density',
+    // 'speed_print',
+    'speed_print_layer_0',
+    'speed_infill',
+    'speed_wall_0',
+    'speed_wall_x',
+    'speed_topbottom',
+    'speed_travel',
+    'speed_travel_layer_0',
+    'retraction_enable',
+    'retract_at_layer_change',
+    'retraction_amount',
+    'retraction_speed',
+    'retraction_hop_enabled',
+    'retraction_hop',
+    // 'Surface'
+    'magic_spiralize',
+    'magic_mesh_surface_mode',
+    // 'HeatedBedAdhesionType'
+    'adhesion_type',
+    'skirt_line_count',
+    'brim_line_count',
+    'raft_margin',
+    // 'Support'
+    'support_enable',
+    'support_type',
+    'support_pattern',
+    'support_infill_rate',
+    'support_z_distance',
+    'support_angle'
+];
+export const PRINTING_QUALITY_CONFIG_GROUP = [
+    {
+        name: 'Quality',
+        fields: [
+            'layer_height',
+            'layer_height_0',
+            'initial_layer_line_width_factor'
+        ]
+    },
+    {
+        name: 'Shell',
+        fields: [
+            'wall_thickness',
+            'top_thickness',
+            'bottom_thickness',
+            'outer_inset_first'
+        ]
+    },
+    {
+        name: 'Infill',
+        fields: [
+            'infill_sparse_density'
+        ]
+    },
+    {
+        name: 'Speed',
+        fields: [
+            // 'speed_print',
+            'speed_print_layer_0',
+            'speed_infill',
+            'speed_wall_0',
+            'speed_wall_x',
+            'speed_topbottom',
+            'speed_travel',
+            'speed_travel_layer_0'
+        ]
+    },
+    {
+        name: 'Retract & Z Hop',
+        fields: [
+            'retraction_enable',
+            'retract_at_layer_change',
+            'retraction_amount',
+            'retraction_speed',
+            'retraction_hop_enabled',
+            'retraction_hop'
+        ]
+    },
+    {
+        name: 'Surface',
+        fields: [
+            'magic_spiralize',
+            'magic_mesh_surface_mode'
+        ]
+    },
+    {
+        name: 'Heated Bed Adhesion Type',
+        fields: [
+            'adhesion_type',
+            'skirt_line_count',
+            'brim_line_count',
+            'raft_margin'
+        ]
+    },
+    {
+        name: 'Support',
+        fields: [
+            'support_enable',
+            'support_type',
+            'support_pattern',
+            'support_infill_rate',
+            'support_z_distance',
+            // 'support_xy_distance',
+            // 'support_xy_overrides_z',
+            'support_angle'
+        ]
+    }
+];
+export const PRINTING_MANAGER_TYPE_MATERIAL = 'material';
+export const PRINTING_MANAGER_TYPE_QUALITY = 'quality';
 
 const publicPath = global.PUBLIC_PATH || '';
+export const DATA_PATH = `${publicPath}/data`;
+
 export const DATA_PREFIX = `${publicPath}/data/Tmp`;
 
 export const CNC_TOOL_SNAP_V_BIT = 'snap.v-bit';
-export const CNC_TOOL_SNAP_V_BIT_CONFIG = { diameter: 3.175, angle: 30 };
+export const CNC_TOOL_SNAP_V_BIT_CONFIG = { diameter: 0.2, angle: 30, shaftDiameter: 3.175 };
 export const CNC_TOOL_SNAP_FLAT_END_MILL = 'snap.flat-end-mill';
-export const CNC_TOOL_SNAP_FLAT_END_MILL_CONFIG = { diameter: 3.175, angle: 180 };
+export const CNC_TOOL_SNAP_FLAT_END_MILL_CONFIG = { diameter: 1.5, angle: 180, shaftDiameter: 1.5 };
 export const CNC_TOOL_SNAP_BALL_END_MILL = 'snap.ball-end-mill';
-export const CNC_TOOL_SNAP_BALL_END_MILL_CONFIG = { diameter: 3.175, angle: 180 };
+export const CNC_TOOL_SNAP_BALL_END_MILL_CONFIG = { diameter: 3.175, angle: 180, shaftDiameter: 3.175 };
+export const CNC_TOOL_SNAP_S_F_S = 'snap.straight-flute-sharp';
+export const CNC_TOOL_SNAP_S_F_S_CONFIG = { diameter: 0.3, angle: 20, shaftDiameter: 3.715 };
 export const CNC_TOOL_CUSTOM = 'custom';
-export const CNC_TOOL_CUSTOM_CONFIG = { diameter: 3.175, angle: 180 };
+export const CNC_TOOL_CUSTOM_CONFIG = { diameter: 0.1, angle: 180, shaftDiameter: 3.175 };
 
 export const LASER_GCODE_SUFFIX = '.nc';
 export const CNC_GCODE_SUFFIX = '.cnc';
@@ -97,6 +234,13 @@ export const CONNECTION_TYPE_WIFI = 'wifi';
 
 export const LASER_PRINT_MODE_AUTO = 'auto';
 export const LASER_PRINT_MODE_MANUAL = 'manual';
+
+export const SELECTEVENT = {
+    UNSELECT_SINGLESELECT: 'select:unSelect-singleSelect',
+    UNSELECT: 'select:unSelect',
+    ADDSELECT: 'select:addSelect',
+    REMOVESELECT: 'select:removeSelect'
+};
 
 export const MACHINE_SERIES = {
     ORIGINAL: {
@@ -166,6 +310,23 @@ export const MACHINE_SERIES = {
             }
         },
         alias: ['SM2-L', 'Snapmaker 2.0 A350']
+    },
+    CUSTOM: {
+        value: 'Custom',
+        label: 'Custom',
+        setting: {
+            size: {
+                x: 125,
+                y: 125,
+                z: 125
+            },
+            laserSize: {
+                x: 125,
+                y: 125,
+                z: 125
+            }
+        },
+        alias: ['Custom']
     }
 };
 
@@ -195,6 +356,41 @@ export const IMAGE_WIFI_CONNECTING = '../../images/connection/Screen.png';
 export const IMAGE_WIFI_CONNECT_WAITING = '../../images/connection/ic_waiting-64x64.png';
 export const IMAGE_WIFI_CONNECTED = '../../images/connection/ic_complete_64x64.png';
 export const IMAGE_WIFI_ERROR = '../../images/connection/ic_error_64x64.png';
-export const IMAGE_WIFI_WAITING = '../../images/connection/ic_Wi-FI_64x64.png';
-
+export const IMAGE_WIFI_WAITING = '../../images/connection/ic_WI-FI_64x64.png';
+export const IMAGE_WIFI_WARNING = '../../images/ic_warning-64x64.png';
+export const IMAGE_EMERGENCY_STOP = '../../images/connection/ic_emergency_stop.png';
+export const HEAD_TYPE_ENV_NAME = {
+    '3dp': '3D printing',
+    'laser': 'Laser',
+    'cnc': 'CNC'
+};
 export const LASER_MOCK_PLATE_HEIGHT = 6;
+
+
+// Model
+export const SOURCE_TYPE_3DP = '3dp';
+export const SOURCE_TYPE_SVG = 'svg';
+export const SOURCE_TYPE_TEXT = 'text';
+export const SOURCE_TYPE_RASTER = 'raster';
+export const SOURCE_TYPE_DXF = 'dxf';
+export const SOURCE_TYPE_IMAGE3D = 'image3d';
+
+export const PROCESS_MODE_BW = 'bw';
+export const PROCESS_MODE_HALFTONE = 'halftone';
+export const PROCESS_MODE_VECTOR = 'vector';
+export const PROCESS_MODE_GREYSCALE = 'greyscale';
+export const PROCESS_MODE_ROTATION = 'rotation';
+export const PROCESS_MODE_PLANE = 'plane';
+export const PROCESS_MODE_4AXIS_LINKAGE = '4axisLinkage';
+
+// 3D Mesh Convert 2D Image
+export const DIRECTION_FRONT = 'front';
+export const DIRECTION_BACK = 'back';
+export const DIRECTION_LEFT = 'left';
+export const DIRECTION_RIGHT = 'right';
+export const DIRECTION_UP = 'up';
+export const DIRECTION_DOWN = 'down';
+
+export const CNC_MESH_SLICE_MODE_ROTATION = 'rotation';
+export const CNC_MESH_SLICE_MODE_LINKAGE = 'linkage';
+export const CNC_MESH_SLICE_MODE_MULTI_DIRECTION = 'multi face';

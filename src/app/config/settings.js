@@ -41,6 +41,7 @@ const settings = {
             'ko', // Korean
             'nl', // Dutch
             'ru', // Russian
+            'uk', // Ukrainian
             'zh-cn' // Simplified Chinese
         ],
 

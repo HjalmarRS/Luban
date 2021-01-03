@@ -3,7 +3,8 @@ import isEmpty from 'lodash/isEmpty';
 import noop from 'lodash/noop';
 import ToolPath from '../../../shared/lib/gcodeToolPath';
 import { DATA_PREFIX } from '../../constants';
-import { readFile } from './index';
+import { readFileToList } from './index';
+import { Vector2 } from '../../../shared/lib/math/Vector2';
 
 const defaultColor = [40, 167, 255];
 const motionColor = {
@@ -24,12 +25,15 @@ class GcodeToBufferGeometryWorkspace {
     // vertexBuffer.push(new THREE.Vector3(this.state.x, this.state.z, -this.state.y));
     async parse(gcodeFilename, gcode, onParsed = noop, onProgress = noop, onError = noop) {
         try {
+            let gcodeList;
             if (!isEmpty(gcodeFilename)) {
                 const gcodeFilepath = `${DATA_PREFIX}/${gcodeFilename}`;
-                gcode = await readFile(gcodeFilepath);
+                gcodeList = await readFileToList(gcodeFilepath);
+            } else {
+                gcodeList = gcode.split('\n');
             }
 
-            if (isEmpty(gcode)) {
+            if (!gcodeList || gcodeList.length === 0) {
                 onError('gcode is empty');
                 return;
             }
@@ -43,57 +47,93 @@ class GcodeToBufferGeometryWorkspace {
             let indexCount = 0;
 
             let progress = 0;
+            let lastMotion = '';
 
             let boundingBox = null;
+
+            const calculateXYZ = (state, modal) => {
+                const { headerType, isRotate = false, diameter } = modal;
+                let z = state.z;
+                if (isRotate && headerType === 'laser') {
+                    z = diameter / 2;
+                }
+                const res = Vector2.rotate({ x: state.x, y: z }, -state.b || 0);
+                return {
+                    x: res.x,
+                    y: state.y,
+                    z: res.y
+                };
+            };
 
             const toolPath = new ToolPath({
                 addLine: (modal, v1, v2) => {
                     const { motion } = modal;
                     const color = motionColor[motion] || defaultColor;
                     const indexColor = indexMotionColor[motion] || defaultColor;
-                    positions.push(v1.x);
-                    positions.push(v1.y);
-                    positions.push(v1.z);
-                    colors.push(color[0]);
-                    colors.push(color[1]);
-                    colors.push(color[2]);
-                    indexColors.push(indexColor[0]);
-                    indexColors.push(indexColor[1]);
-                    indexColors.push(indexColor[2]);
-                    positions.push(v2.x);
-                    positions.push(v2.y);
-                    positions.push(v2.z);
-                    colors.push(color[0]);
-                    colors.push(color[1]);
-                    colors.push(color[2]);
-                    indexColors.push(indexColor[0]);
-                    indexColors.push(indexColor[1]);
-                    indexColors.push(indexColor[2]);
+                    if (lastMotion !== motion) {
+                        const res = calculateXYZ(v1, modal);
+                        positions.push(res.x);
+                        positions.push(res.y);
+                        positions.push(res.z);
+                        colors.push(color[0]);
+                        colors.push(color[1]);
+                        colors.push(color[2]);
+                        indexColors.push(indexColor[0]);
+                        indexColors.push(indexColor[1]);
+                        indexColors.push(indexColor[2]);
 
-                    indexs.push(indexCount);
-                    indexs.push(indexCount);
+                        lastMotion = motion;
 
-                    if (motion === 'G1' && (v1.x !== v2.x || v1.y !== v2.y || v1.z !== v2.z)) {
+                        indexs.push(indexCount);
+                    }
+
+                    const segCount = Math.max(Math.ceil(Math.abs(v2.b - v1.b) / 5), 1);
+
+                    for (let j = 1; j <= segCount; j++) {
+                        const res = calculateXYZ({
+                            x: v1.x + (v2.x - v1.x) / segCount * j,
+                            y: v1.y + (v2.y - v1.y) / segCount * j,
+                            z: v1.z + (v2.z - v1.z) / segCount * j,
+                            b: v1.b + (v2.b - v1.b) / segCount * j
+                        }, modal);
+                        positions.push(res.x);
+                        positions.push(res.y);
+                        positions.push(res.z);
+                        colors.push(color[0]);
+                        colors.push(color[1]);
+                        colors.push(color[2]);
+                        indexColors.push(indexColor[0]);
+                        indexColors.push(indexColor[1]);
+                        indexColors.push(indexColor[2]);
+
+                        indexs.push(indexCount);
+                    }
+
+                    if (motion === 'G1' && (v1.x !== v2.x || v1.y !== v2.y || v1.z !== v2.z || v1.b !== v2.b)) {
                         if (boundingBox === null) {
                             boundingBox = {
                                 max: {
                                     x: v2.x,
                                     y: v2.y,
-                                    z: v2.z
+                                    z: v2.z,
+                                    b: v2.b
                                 },
                                 min: {
-                                    x: v2.x,
-                                    y: v2.y,
-                                    z: v2.z
+                                    x: v1.x,
+                                    y: v1.y,
+                                    z: v1.z,
+                                    b: v1.b
                                 }
                             };
                         } else {
                             boundingBox.max.x = Math.max(boundingBox.max.x, v2.x);
                             boundingBox.max.y = Math.max(boundingBox.max.y, v2.y);
                             boundingBox.max.z = Math.max(boundingBox.max.z, v2.z);
+                            boundingBox.max.b = Math.max(boundingBox.max.b, v2.b);
                             boundingBox.min.x = Math.min(boundingBox.min.x, v2.x);
                             boundingBox.min.y = Math.min(boundingBox.min.y, v2.y);
                             boundingBox.min.z = Math.min(boundingBox.min.z, v2.z);
+                            boundingBox.min.b = Math.min(boundingBox.min.b, v2.b);
                         }
                     }
                 },
@@ -172,7 +212,11 @@ class GcodeToBufferGeometryWorkspace {
                             bufferGeometry.addAttribute('a_index_color', indexColorAttribute);
                             bufferGeometry.addAttribute('a_index', indexAttribute);
 
-                            onParsed({ bufferGeometry: bufferGeometry, renderMethod: renderMethodTmp, isDone: false });
+                            onParsed({
+                                bufferGeometry: bufferGeometry,
+                                renderMethod: renderMethodTmp,
+                                isDone: false
+                            });
 
                             positions = [];
                             colors = [];
@@ -183,7 +227,7 @@ class GcodeToBufferGeometryWorkspace {
                 }
             });
 
-            toolPath.loadFromStringSync(gcode, (line, i, length) => {
+            toolPath.loadFromArraySync(gcodeList, (line, i, length) => {
                 const curProgress = i / length;
                 if ((curProgress - progress > 0.01)) {
                     progress = curProgress;
@@ -208,7 +252,30 @@ class GcodeToBufferGeometryWorkspace {
             bufferGeometry.addAttribute('a_color', colorAttribute);
             bufferGeometry.addAttribute('a_index_color', indexColorAttribute);
             bufferGeometry.addAttribute('a_index', indexAttribute);
-            onParsed({ bufferGeometry: bufferGeometry, renderMethod: renderMethodTmp, isDone: true, boundingBox: boundingBox });
+
+            if (boundingBox === null) {
+                boundingBox = {
+                    max: {
+                        x: 0,
+                        y: 0,
+                        z: 0,
+                        b: 0
+                    },
+                    min: {
+                        x: 0,
+                        y: 0,
+                        z: 0,
+                        b: 0
+                    }
+                };
+            }
+
+            onParsed({
+                bufferGeometry: bufferGeometry,
+                renderMethod: renderMethodTmp,
+                isDone: true,
+                boundingBox: boundingBox
+            });
         } catch (err) {
             onError(err);
         }

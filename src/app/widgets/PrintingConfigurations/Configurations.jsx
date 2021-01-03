@@ -3,16 +3,16 @@ import PropTypes from 'prop-types';
 import { connect } from 'react-redux';
 import Select from 'react-select';
 import classNames from 'classnames';
-import includes from 'lodash/includes';
 import Anchor from '../../components/Anchor';
-import Notifications from '../../components/Notifications';
 import OptionalDropdown from '../../components/OptionalDropdown';
 import TipTrigger from '../../components/TipTrigger';
 import { NumberInput as Input } from '../../components/Input';
 import i18n from '../../lib/i18n';
-import confirm from '../../lib/confirm';
 import widgetStyles from '../styles.styl';
 import { actions as printingActions } from '../../flux/printing';
+import { actions as projectActions } from '../../flux/project';
+import { HEAD_3DP, PRINTING_MANAGER_TYPE_QUALITY, PRINTING_QUALITY_CONFIG_GROUP } from '../../constants';
+
 import styles from './styles.styl';
 
 const OFFICIAL_CONFIG_KEYS = [
@@ -30,29 +30,23 @@ const OFFICIAL_CONFIG_KEYS = [
 function isDefinitionEditable(definition) {
     return !definition.metadata.readonly;
 }
-function isOfficialDefinition(definition) {
-    return includes(['quality.fast_print',
-        'quality.normal_quality',
-        'quality.high_quality'], definition.definitionId);
-}
+
 
 // config type: official ('fast print', 'normal quality', 'high quality'); custom: ...
 // do all things by 'config name'
 class Configurations extends PureComponent {
     static propTypes = {
         setTitle: PropTypes.func.isRequired,
-        isAdvised: PropTypes.bool.isRequired,
+        isRecommended: PropTypes.bool.isRequired,
         defaultQualityId: PropTypes.string.isRequired,
         qualityDefinitions: PropTypes.array.isRequired,
+
+        updateManagerDisplayType: PropTypes.func.isRequired,
+        updateDefinitionsForManager: PropTypes.func.isRequired,
         updateDefinitionSettings: PropTypes.func.isRequired,
         updateActiveDefinition: PropTypes.func.isRequired,
-        duplicateQualityDefinition: PropTypes.func.isRequired,
-        removeQualityDefinition: PropTypes.func.isRequired,
-        updateQualityDefinitionName: PropTypes.func.isRequired,
-        onDownloadQualityDefinition: PropTypes.func.isRequired,
-        onUploadQualityDefinition: PropTypes.func.isRequired,
-
-        updateDefaultAdvised: PropTypes.func.isRequired,
+        updateShowPrintingManager: PropTypes.func.isRequired,
+        updateIsRecommended: PropTypes.func.isRequired,
         updateDefaultQualityId: PropTypes.func.isRequired
     };
 
@@ -60,198 +54,52 @@ class Configurations extends PureComponent {
 
     state = {
         // control UI
-        notificationMessage: '',
         showOfficialConfigDetails: true,
 
-        isOfficialTab: true,
-        officialQualityDefinition: null,
-        customQualityDefinition: null,
+        selectedDefinition: null,
 
-        // rename custom config
-        newName: null,
-        isRenaming: false,
+        customConfigGroup: PRINTING_QUALITY_CONFIG_GROUP.map((config) => {
+            config.expanded = false;
+            return config;
+        })
 
-        // custom config
-        customDefinitionOptions: [],
-        customConfigGroup: [
-            {
-                name: i18n._('Quality'),
-                expanded: false,
-                fields: [
-                    'layer_height',
-                    'layer_height_0',
-                    'initial_layer_line_width_factor'
-                ]
-            },
-            {
-                name: i18n._('Shell'),
-                expanded: false,
-                fields: [
-                    'wall_thickness',
-                    'top_thickness',
-                    'bottom_thickness',
-                    'outer_inset_first'
-                ]
-            },
-            {
-                name: i18n._('Infill'),
-                expanded: false,
-                fields: [
-                    'infill_sparse_density'
-                ]
-            },
-            {
-                name: i18n._('Speed'),
-                expanded: false,
-                fields: [
-                    // 'speed_print',
-                    'speed_print_layer_0',
-                    'speed_infill',
-                    'speed_wall_0',
-                    'speed_wall_x',
-                    'speed_topbottom',
-                    'speed_travel',
-                    'speed_travel_layer_0'
-                ]
-            },
-            {
-                name: i18n._('Retract & Z Hop'),
-                expanded: false,
-                fields: [
-                    'retraction_enable',
-                    'retract_at_layer_change',
-                    'retraction_amount',
-                    'retraction_speed',
-                    'retraction_hop_enabled',
-                    'retraction_hop'
-                ]
-            },
-            {
-                name: i18n._('Surface'),
-                expanded: false,
-                fields: [
-                    'magic_spiralize',
-                    'magic_mesh_surface_mode'
-                ]
-            },
-            {
-                name: i18n._('Adhesion'),
-                expanded: false,
-                fields: [
-                    'adhesion_type',
-                    'skirt_line_count',
-                    'brim_line_count',
-                    'raft_margin'
-                ]
-            },
-            {
-                name: i18n._('Support'),
-                expanded: false,
-                fields: [
-                    'support_enable',
-                    'support_type',
-                    'support_pattern',
-                    'support_infill_rate',
-                    'support_angle'
-                ]
-            }
-        ]
     };
 
     actions = {
-        onClickToUpload: () => {
-            this.fileInput.current.value = null;
-            this.fileInput.current.click();
+        onShowMaterialManager: () => {
+            this.props.updateManagerDisplayType(PRINTING_MANAGER_TYPE_QUALITY);
+            this.props.updateShowPrintingManager(true);
         },
-        onChangeFile: (event) => {
-            const file = event.target.files[0];
-            this.props.onUploadQualityDefinition(file);
-        },
-        showNotification: (msg) => {
-            this.setState({
-                notificationMessage: msg
-            });
-        },
-        clearNotification: () => {
-            this.setState({
-                notificationMessage: ''
-            });
-        },
+        /**
+         * Select `definition`.
+         *
+         * @param definition
+         */
         onSelectOfficialDefinition: (definition) => {
             this.setState({
-                isOfficialTab: true,
-                officialQualityDefinition: definition
+                selectedDefinition: definition
             });
             this.props.updateDefaultQualityId(definition.definitionId);
             this.props.updateActiveDefinition(definition);
         },
         onSelectCustomDefinitionById: (definitionId) => {
             const definition = this.props.qualityDefinitions.find(d => d.definitionId === definitionId);
-
             // has to update defaultQualityId
             this.props.updateDefaultQualityId(definitionId);
             this.actions.onSelectCustomDefinition(definition);
         },
         onSelectCustomDefinition: (definition) => {
             this.setState({
-                isOfficialTab: false,
-                customQualityDefinition: definition,
-                isRenaming: false
+                selectedDefinition: definition
             });
             // this.props.updateDefaultQualityId(definition.definitionId);
             this.props.updateActiveDefinition(definition);
         },
-        // Extended operations
-        onChangeNewName: (event) => {
-            this.setState({
-                newName: event.target.value
-            });
-        },
-        onRenameDefinitionStart: () => {
-            if (!this.state.isRenaming) {
-                const definition = this.state.customQualityDefinition;
-                this.setState({
-                    isRenaming: true,
-                    newName: definition.name
-                });
-            } else {
-                this.actions.onRenameDefinitionEnd();
-            }
-        },
-        onRenameDefinitionEnd: async () => {
-            const definition = this.state.customQualityDefinition;
-            const { newName } = this.state;
-
-            if (newName === definition.name) { // unchanged
-                this.setState({
-                    isRenaming: false
-                });
-                return;
-            }
-
-            try {
-                await this.props.updateQualityDefinitionName(definition, newName);
-            } catch (err) {
-                this.actions.showNotification(err);
-            }
-
-            // Update options
-            const customDefinitionOptions = this.props.qualityDefinitions.map(d => ({
-                label: d.name,
-                value: d.definitionId
-            }));
-
-            this.setState({
-                isRenaming: false,
-                customDefinitionOptions
-            });
-        },
-        onChangeCustomDefinition: (key, value) => {
-            const definition = this.state.customQualityDefinition;
+        onChangeCustomDefinition: (key, value, shouldUpdateDefinitionsForManager = false) => {
+            const definition = this.props.qualityDefinitions.find(d => d.definitionId === this.props.defaultQualityId);
             if (!isDefinitionEditable(definition)) {
                 return;
             }
-
             definition.settings[key].default_value = value;
 
             this.props.updateDefinitionSettings(definition, {
@@ -263,44 +111,15 @@ class Configurations extends PureComponent {
                     [key]: { default_value: value }
                 }
             });
-        },
-        onDuplicateDefinition: async () => {
-            const definition = this.state.customQualityDefinition;
-            const newDefinition = await this.props.duplicateQualityDefinition(definition);
-
-            // Select new definition after creation
-            this.actions.onSelectCustomDefinition(newDefinition);
-        },
-        onDownloadQualityDefinition: () => {
-            const definition = this.state.customQualityDefinition;
-            this.props.onDownloadQualityDefinition(definition.definitionId);
-        },
-        onRemoveDefinition: async () => {
-            const definition = this.state.customQualityDefinition;
-            await confirm({
-                body: `Are you sure to remove profile "${definition.name}"?`
-            });
-
-            await this.props.removeQualityDefinition(definition);
-            this.props.updateDefaultQualityId('quality.fast_print');
-
-            // After removal, select the first definition
-            if (this.props.qualityDefinitions.length) {
-                this.actions.onSelectCustomDefinition(this.props.qualityDefinitions[0]);
+            if (shouldUpdateDefinitionsForManager) {
+                this.props.updateDefinitionsForManager(definition.definitionId, PRINTING_MANAGER_TYPE_QUALITY);
             }
         },
-        onSetOfficoalTab: (isAdvised) => {
-            if (isAdvised) {
-                this.setState({
-                    isOfficialTab: true
-                });
-            } else {
-                this.setState({
-                    isOfficialTab: false
-                });
+        onSetOfficialTab: (isRecommended) => {
+            if (isRecommended && (/^quality.([0-9_]+)$/.test(this.props.defaultQualityId) || this.props.defaultQualityId.indexOf('Caselibrary') > -1)) {
+                this.props.updateDefaultQualityId('quality.fast_print');
             }
-            this.props.updateDefaultQualityId('quality.fast_print');
-            this.props.updateDefaultAdvised(isAdvised);
+            this.props.updateIsRecommended(isRecommended);
         }
     };
 
@@ -309,65 +128,21 @@ class Configurations extends PureComponent {
         this.props.setTitle(i18n._('Printing Settings'));
     }
 
-    componentWillReceiveProps(nextProps) {
-        if (nextProps.qualityDefinitions !== this.props.qualityDefinitions) {
-            const newState = {};
+    componentDidUpdate(prevProps) {
+        const { defaultQualityId, qualityDefinitions } = this.props;
 
-            // First load initialization
-            if (this.props.qualityDefinitions.length === 0) {
-                const definition = nextProps.qualityDefinitions.find(d => d.definitionId === 'quality.fast_print');
+        // selected quality ID or definitions changed
+        if (defaultQualityId !== prevProps.defaultQualityId || qualityDefinitions !== prevProps.qualityDefinitions) {
+            // re-select definition based on new properties
+            let definition = null;
 
-                Object.assign(newState, {
-                    isOfficialTab: true,
-                    officialQualityDefinition: definition,
-                    customQualityDefinition: definition
-                });
-
-                this.props.updateActiveDefinition(definition);
-            } else {
-                const officialQualityDefinition = nextProps.qualityDefinitions.find(d => d.definitionId === this.state.officialQualityDefinition.definitionId)
-                || nextProps.qualityDefinitions.find(d => d.definitionId === 'quality.fast_print');
-                const customQualityDefinition = nextProps.qualityDefinitions.find(d => d.definitionId === this.state.customQualityDefinition.definitionId)
-                    || nextProps.qualityDefinitions.find(d => d.definitionId === 'quality.fast_print');
-                Object.assign(newState, {
-                    officialQualityDefinition: officialQualityDefinition,
-                    customQualityDefinition: customQualityDefinition
-                });
-                this.props.updateActiveDefinition(officialQualityDefinition);
-                this.props.updateActiveDefinition(customQualityDefinition);
+            if (defaultQualityId && qualityDefinitions.length > 0) {
+                definition = qualityDefinitions.find(d => d.definitionId === defaultQualityId);
             }
 
-            // Update custom definition options
-            const customDefinitionOptions = nextProps.qualityDefinitions.map(d => ({
-                label: d.name,
-                value: d.definitionId
-            }));
-            Object.assign(newState, {
-                customDefinitionOptions: customDefinitionOptions
-            });
-
-            this.setState(newState);
-        }
-
-
-        if (nextProps.isAdvised !== this.props.isAdvised) {
-            if (nextProps.isAdvised) {
-                this.actions.onSetOfficoalTab(true);
-            } else {
-                this.actions.onSetOfficoalTab(false);
-            }
-            if (nextProps.defaultQualityId !== this.props.defaultQualityId) {
-                const definition = nextProps.qualityDefinitions.find(d => d.definitionId === nextProps.defaultQualityId);
-                if (nextProps.isAdvised) {
-                    this.actions.onSelectOfficialDefinition(definition);
-                } else {
-                    this.actions.onSelectCustomDefinition(definition);
-                }
-            }
-        } else if (nextProps.defaultQualityId !== this.props.defaultQualityId) {
-            const definition = nextProps.qualityDefinitions.find(d => d.definitionId === nextProps.defaultQualityId);
-            if (nextProps.isAdvised) {
-                this.actions.onSelectOfficialDefinition(definition);
+            if (!definition) {
+                // definition no found, select first official definition
+                this.actions.onSelectOfficialDefinition(qualityDefinitions[0]);
             } else {
                 this.actions.onSelectCustomDefinition(definition);
             }
@@ -375,15 +150,20 @@ class Configurations extends PureComponent {
     }
 
     render() {
+        const { isRecommended, qualityDefinitions } = this.props;
         const state = this.state;
         const actions = this.actions;
 
-        const fastPrintDefinition = this.props.qualityDefinitions.find(d => d.definitionId === 'quality.fast_print');
-        const normalQualityDefinition = this.props.qualityDefinitions.find(d => d.definitionId === 'quality.normal_quality');
-        const highQualityDefinition = this.props.qualityDefinitions.find(d => d.definitionId === 'quality.high_quality');
+        const fastPrintDefinition = qualityDefinitions.find(d => d.definitionId === 'quality.fast_print');
+        const normalQualityDefinition = qualityDefinitions.find(d => d.definitionId === 'quality.normal_quality');
+        const highQualityDefinition = qualityDefinitions.find(d => d.definitionId === 'quality.high_quality');
 
-        const { isOfficialTab, officialQualityDefinition, customQualityDefinition, customDefinitionOptions } = this.state;
-        const qualityDefinition = isOfficialTab ? officialQualityDefinition : customQualityDefinition;
+        const qualityDefinition = this.state.selectedDefinition;
+
+        const customDefinitionOptions = qualityDefinitions.map(d => ({
+            label: d.name,
+            value: d.definitionId
+        }));
 
         if (!qualityDefinition) {
             return null;
@@ -396,26 +176,35 @@ class Configurations extends PureComponent {
                 <div className="sm-tabs" style={{ marginTop: '6px', marginBottom: '12px' }}>
                     <button
                         type="button"
-                        style={{ width: '50%' }}
-                        className={classNames('sm-tab', { 'sm-selected': isOfficialTab })}
+                        style={{ width: '43%' }}
+                        className={classNames('sm-tab', { 'sm-selected': isRecommended })}
                         onClick={() => {
-                            this.actions.onSetOfficoalTab(true);
+                            this.actions.onSetOfficialTab(true);
                         }}
                     >
                         {i18n._('Recommended')}
                     </button>
                     <button
                         type="button"
-                        style={{ width: '50%' }}
-                        className={classNames('sm-tab', { 'sm-selected': !isOfficialTab })}
+                        style={{ width: '43%', borderRight: '1px solid #c8c8c8' }}
+                        className={classNames('sm-tab', { 'sm-selected': !isRecommended })}
                         onClick={() => {
-                            this.actions.onSetOfficoalTab(false);
+                            this.actions.onSetOfficialTab(false);
                         }}
                     >
                         {i18n._('Customize')}
                     </button>
+                    <Anchor
+                        onClick={this.actions.onShowMaterialManager}
+                    >
+                        <span
+                            className={classNames(
+                                styles['manager-icon'],
+                            )}
+                        />
+                    </Anchor>
                 </div>
-                {isOfficialTab && (
+                {isRecommended && (
                     <div className="sm-tabs" style={{ marginTop: '12px' }}>
                         <button
                             type="button"
@@ -449,9 +238,10 @@ class Configurations extends PureComponent {
                         </button>
                     </div>
                 )}
-                {isOfficialTab && (
+                {isRecommended && (
                     <div style={{ marginTop: '12px', marginBottom: '6px' }}>
                         <OptionalDropdown
+                            draggable="false"
                             title={i18n._('Show Details')}
                             hidden={!state.showOfficialConfigDetails}
                             onClick={() => {
@@ -482,17 +272,12 @@ class Configurations extends PureComponent {
                         </OptionalDropdown>
                     </div>
                 )}
-                {!isOfficialTab && (
+                {!isRecommended && (
                     <div style={{ marginBottom: '6px' }}>
-                        <input
-                            ref={this.fileInput}
-                            type="file"
-                            accept=".json"
-                            style={{ display: 'none' }}
-                            multiple={false}
-                            onChange={actions.onChangeFile}
-                        />
-                        <div>
+                        <div style={{
+                            marginBottom: '10px'
+                        }}
+                        >
                             <span style={{
                                 width: '100px',
                                 lineHeight: '34px',
@@ -520,64 +305,11 @@ class Configurations extends PureComponent {
                                 />
                             </span>
                         </div>
-                        <div style={{ marginTop: '10px', color: '#808080' }}>
-                            {!state.isRenaming && (
-                                <span>{qualityDefinition.name}</span>
-                            )}
-                            {state.isRenaming && (
-                                <React.Fragment>
-                                    <input
-                                        value={state.newName}
-                                        onChange={actions.onChangeNewName}
-                                    />
-                                    <Anchor
-                                        className={classNames('fa', 'fa-check', widgetStyles['fa-btn'])}
-                                        onClick={actions.onRenameDefinitionEnd}
-                                    />
-                                </React.Fragment>
-                            )}
-                            <div
-                                style={{
-                                    display: 'inline-block',
-                                    float: 'right'
-                                }}
-                            >
-                                {!isOfficialDefinition(qualityDefinition) && (
-                                    <Anchor
-                                        className={classNames('fa', 'fa-edit', widgetStyles['fa-btn'])}
-                                        onClick={actions.onRenameDefinitionStart}
-                                    />
-                                )}
-                                <Anchor
-                                    className={classNames('fa', 'fa-upload', widgetStyles['fa-btn'])}
-                                    onClick={actions.onClickToUpload}
-                                />
-                                <Anchor
-                                    className={classNames('fa', 'fa-download', widgetStyles['fa-btn'])}
-                                    onClick={actions.onDownloadQualityDefinition}
-                                />
-                                <Anchor
-                                    className={classNames('fa', 'fa-plus', widgetStyles['fa-btn'])}
-                                    onClick={actions.onDuplicateDefinition}
-                                />
-                                {!isOfficialDefinition(qualityDefinition) && (
-                                    <Anchor
-                                        className={classNames('fa', 'fa-trash-o', widgetStyles['fa-btn'])}
-                                        onClick={actions.onRemoveDefinition}
-                                    />
-                                )}
-                            </div>
-                        </div>
                         <div className={classNames(widgetStyles.separator, widgetStyles['separator-underline'])} />
-                        {state.notificationMessage && (
-                            <Notifications bsStyle="danger" onDismiss={actions.clearNotification}>
-                                {state.notificationMessage}
-                            </Notifications>
-                        )}
                         <div className="sm-parameter-container">
                             {this.state.customConfigGroup.map((group) => {
                                 return (
-                                    <div key={group.name}>
+                                    <div key={i18n._(group.name)}>
                                         <Anchor
                                             className="sm-parameter-header"
                                             onClick={() => {
@@ -631,19 +363,42 @@ class Configurations extends PureComponent {
                                                         .map(c => c.trim());
                                                     let result = false;
                                                     for (const condition of orConditions) {
-                                                        const enabledKey = condition.match("resolveOrValue\\('(.[^)|']*)'") ? condition.match("resolveOrValue\\('(.[^)|']*)'")[1] : null;
-                                                        const enabledValue = condition.match("== ?'(.[^)|']*)'") ? condition.match("== ?'(.[^)|']*)'")[1] : null;
-                                                        if (enabledKey) {
+                                                        if (qualityDefinition.settings[condition]) {
+                                                            const value = qualityDefinition.settings[condition].default_value;
+                                                            if (value) {
+                                                                result = true;
+                                                            }
+                                                        }
+                                                        if (condition.match('(.*) > ([0-9]+)')) {
+                                                            const m = condition.match('(.*) > ([0-9]+)');
+                                                            const enabledKey = m[1];
+                                                            const enabledValue = parseInt(m[2], 10);
                                                             if (qualityDefinition.settings[enabledKey]) {
                                                                 const value = qualityDefinition.settings[enabledKey].default_value;
-                                                                if (value === enabledValue) {
+                                                                if (value > enabledValue) {
                                                                     result = true;
                                                                 }
                                                             }
-                                                        } else {
-                                                            if (qualityDefinition.settings[condition]) {
-                                                                const value = qualityDefinition.settings[condition].default_value;
-                                                                if (value) {
+                                                        }
+                                                        if (condition.match('(.*) < ([0-9]+)')) {
+                                                            const m = condition.match('(.*) > ([0-9]+)');
+                                                            const enabledKey = m[1];
+                                                            const enabledValue = parseInt(m[2], 10);
+                                                            if (qualityDefinition.settings[enabledKey]) {
+                                                                const value = qualityDefinition.settings[enabledKey].default_value;
+                                                                if (value < enabledValue) {
+                                                                    result = true;
+                                                                }
+                                                            }
+                                                        }
+                                                        if (condition.match("resolveOrValue\\('(.[^)|']*)'")) {
+                                                            const m1 = condition.match("resolveOrValue\\('(.[^)|']*)'");
+                                                            const m2 = condition.match("== ?'(.[^)|']*)'");
+                                                            const enabledKey = m1[1];
+                                                            const enabledValue = m2[1];
+                                                            if (qualityDefinition.settings[enabledKey]) {
+                                                                const value = qualityDefinition.settings[enabledKey].default_value;
+                                                                if (value === enabledValue) {
                                                                     result = true;
                                                                 }
                                                             }
@@ -680,7 +435,9 @@ class Configurations extends PureComponent {
                                                                 }}
                                                             />
                                                         )}
-                                                        {type === 'float' && <span className="sm-parameter-row__input-unit">{unit}</span>}
+                                                        {type === 'float' && (
+                                                            <span className="sm-parameter-row__input-unit">{unit}</span>
+                                                        )}
                                                         {type === 'int' && (
                                                             <Input
                                                                 className="sm-parameter-row__input"
@@ -691,14 +448,16 @@ class Configurations extends PureComponent {
                                                                 }}
                                                             />
                                                         )}
-                                                        {type === 'int' && <span className="sm-parameter-row__input-unit">{unit}</span>}
+                                                        {type === 'int' && (
+                                                            <span className="sm-parameter-row__input-unit">{unit}</span>
+                                                        )}
                                                         {type === 'bool' && (
                                                             <input
                                                                 className="sm-parameter-row__checkbox"
                                                                 type="checkbox"
                                                                 checked={defaultValue}
                                                                 disabled={!editable}
-                                                                onChange={(event) => actions.onChangeCustomDefinition(key, event.target.checked)}
+                                                                onChange={(event) => actions.onChangeCustomDefinition(key, event.target.checked, type === 'bool')}
                                                             />
                                                         )}
                                                         {type === 'enum' && (
@@ -726,7 +485,6 @@ class Configurations extends PureComponent {
                                 );
                             })}
                         </div>
-                        <div className={widgetStyles.separator} />
                     </div>
                 )}
             </div>
@@ -735,26 +493,28 @@ class Configurations extends PureComponent {
 }
 
 const mapStateToProps = (state) => {
-    const { qualityDefinitions, defaultQualityId, isAdvised, activeDefinition } = state.printing;
+    const { qualityDefinitions, defaultQualityId, isRecommended, activeDefinition } = state.printing;
     return {
         qualityDefinitions,
         defaultQualityId,
-        isAdvised,
+        isRecommended,
         activeDefinition
     };
 };
 
 const mapDispatchToProps = (dispatch) => {
     return {
-        updateDefaultAdvised: (isAdvised) => dispatch(printingActions.updateState({ 'isAdvised': isAdvised })),
-        updateDefaultQualityId: (defaultQualityId) => dispatch(printingActions.updateState({ defaultQualityId })),
-        updateActiveDefinition: (definition) => dispatch(printingActions.updateActiveDefinition(definition)),
-        duplicateQualityDefinition: (definition) => dispatch(printingActions.duplicateQualityDefinition(definition)),
-        onDownloadQualityDefinition: (definitionId) => dispatch(printingActions.onDownloadQualityDefinition(definitionId)),
-        onUploadQualityDefinition: (file) => dispatch(printingActions.onUploadQualityDefinition(file)),
-        removeQualityDefinition: (definition) => dispatch(printingActions.removeQualityDefinition(definition)),
+        updateIsRecommended: (isRecommended) => dispatch(printingActions.updateIsRecommended(isRecommended)),
+        updateDefaultQualityId: (qualityId) => dispatch(printingActions.updateDefaultQualityId(qualityId)),
+        updateActiveDefinition: (definition) => {
+            dispatch(printingActions.updateActiveDefinition(definition));
+            dispatch(projectActions.autoSaveEnvironment(HEAD_3DP, true));
+        },
+        updateManagerDisplayType: (managerDisplayType) => dispatch(printingActions.updateManagerDisplayType(managerDisplayType)),
         updateQualityDefinitionName: (definition, name) => dispatch(printingActions.updateQualityDefinitionName(definition, name)),
-        updateDefinitionSettings: (definition, settings) => dispatch(printingActions.updateDefinitionSettings(definition, settings))
+        updateShowPrintingManager: (showPrintingManager) => dispatch(printingActions.updateShowPrintingManager(showPrintingManager)),
+        updateDefinitionSettings: (definition, settings) => dispatch(printingActions.updateDefinitionSettings(definition, settings)),
+        updateDefinitionsForManager: (definitionId, type) => dispatch(printingActions.updateDefinitionsForManager(definitionId, type))
     };
 };
 

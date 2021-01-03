@@ -130,15 +130,17 @@ export const actions = {
     uploadGcodeFileToList: (file) => (dispatch) => {
         const formData = new FormData();
         formData.append('file', file);
-        api.uploadFile(formData)
+
+        api.uploadGcodeFile(formData)
             .then((res) => {
                 const response = res.body;
+                const header = response.gcodeHeader;
                 const gcodeFile = {
                     name: file.name,
                     uploadName: response.uploadName,
                     size: file.size,
-                    lastModifiedDate: file.lastModifiedDate,
-                    thumbnail: ''
+                    lastModified: file.lastModified,
+                    thumbnail: header[';thumbnail'] || ''
                 };
                 dispatch(actions.addGcodeFiles(gcodeFile));
             })
@@ -157,19 +159,20 @@ export const actions = {
      */
     uploadGcodeFile: (file) => (dispatch) => {
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', (file instanceof File) ? file : JSON.stringify(file));
         const uploadName = pathWithRandomSuffix(file.name);
         formData.append('uploadName', uploadName);
 
-        api.uploadFile(formData)
+        api.uploadGcodeFile(formData)
             .then((res) => {
                 const response = res.body;
+                const header = response.gcodeHeader;
                 const gcodeFile = {
                     name: file.name,
                     uploadName: response.uploadName,
                     size: file.size,
-                    lastModifiedDate: file.lastModifiedDate,
-                    thumbnail: ''
+                    lastModified: +file.lastModified,
+                    thumbnail: header[';thumbnail'] || ''
                 };
                 dispatch(actions.renderGcodeFile(gcodeFile));
             })
@@ -223,7 +226,7 @@ export const actions = {
                 name: file.name,
                 uploadName: response.uploadName,
                 size: file.size,
-                lastModifiedDate: file.lastModifiedDate,
+                lastModified: +file.lastModified,
                 thumbnail: ''
             };
             dispatch(actions.renderGcodeFile(gcodeFile, false));
@@ -236,7 +239,6 @@ export const actions = {
         if (needToList) {
             dispatch(actions.addGcodeFiles(gcodeFile));
         }
-
         if (oldGcodeFile !== null && oldGcodeFile.uploadName === gcodeFile.uploadName) {
             return;
         }

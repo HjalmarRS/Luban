@@ -4,7 +4,8 @@ os:
 
 # https://docs.travis-ci.com/user/reference/osx/#OS-X-Version
 # Default: 9.4
-osx_image: xcode11.3  # macOS 10.14
+osx_image: xcode11.6  # Xcode 11.6, macOS 10.15.5, JDK 14.02
+# osx_image: xcode12u  # Xcode 12.0, macOS 10.15.5, JDK 14.0.1
 
 # Linux Ubuntu Precise
 sudo: required
@@ -26,15 +27,14 @@ addons:
             - graphicsmagick
             - gcc-multilib
             - g++-multilib
+            - libgconf-2-4
+            - binutils
+            - rpm
 
 before_install:
     - git --version
     - git config --global user.name "Travis CI"
     - git config --global user.email "travis@travis-ci.org"
-    - |
-        if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
-            brew update;
-        fi
     - npm install -g npm@latest
     - npm --version
 
@@ -61,7 +61,9 @@ after_success:
             sudo spctl --status;
             travis_wait 60 npm run build:mac-x64;
             ls -al output output/*;
+            cp -af "output/latest-mac.yml" "releases/latest-mac.yml";
             cp -af "output/${PRODUCT_NAME}-${PACKAGE_VERSION}.dmg" "releases/${RELEASE}-mac-x64.dmg";
+            cp -af "output/${PRODUCT_NAME}-${PACKAGE_VERSION}-mac.zip" "releases/${RELEASE}-mac.zip";
             ls -al releases/*;
         fi
     - |
@@ -70,6 +72,7 @@ after_success:
             npm run build:linux-x64;
             ls -al output output/*;
             cp -af "output/${PACKAGE_NAME}_${PACKAGE_VERSION}_amd64.deb" "releases/${RELEASE}-linux-amd64.deb";
+            cp -af "output/${PACKAGE_NAME}-${PACKAGE_VERSION}.x86_64.rpm" "releases/${RELEASE}-linux.x86_64.rpm";
             pushd releases;
             ln -sf ../output/linux-unpacked "${RELEASE}-linux-x64";
             tar zcfh "${RELEASE}-linux-x64.tar.gz" "${RELEASE}-linux-x64";
@@ -83,6 +86,7 @@ after_success:
             npm run build:linux-ia32;
             ls -al output output/*;
             cp -af "output/${PACKAGE_NAME}_${PACKAGE_VERSION}_i386.deb" "releases/${RELEASE}-linux-i386.deb";
+            cp -af "output/${PACKAGE_NAME}-${PACKAGE_VERSION}.i686.rpm" "releases/${RELEASE}-linux.i686.rpm";
             pushd releases;
             ln -sf ../output/linux-ia32-unpacked "${RELEASE}-linux-ia32";
             tar zcfh "${RELEASE}-linux-ia32.tar.gz" "${RELEASE}-linux-ia32";
